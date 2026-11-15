@@ -19,7 +19,20 @@ package com.aungdev.fly_lab
 //     frame or two behind fast movement.
 // Channel "flylab/camera": start {front} -> {textureId, width, height, front},
 //   switchCamera, set {smooth, white, ...}, setBackground {mode: none / blur /
-//   mask}, stats -> {fps, segMs, segFps, delegate}, stop.
+//   mask / city / warp / matrix / grid / aurora / chrome}, stats -> {fps,
+//   segMs, segFps, delegate, lastCrash}, clearCrash, stop.
+//
+// Step 3 (16 Nov 2026):
+//   - 6 futuristic animated backgrounds (LabBackgrounds.kt, GPU shaders,
+//     Android 13+) with a neon rim glow around the person (Android 12+).
+//   - Halo fix for Blur: step 1 blurred the WHOLE frame, so the person's
+//     own colours smeared into the background (grey halo around the hair).
+//     Now the seg thread builds a "clean" blurred background from the small
+//     frame copy with the person's pixels weighted out (a weighted box blur:
+//     sum(colour * w) / sum(w), w = 1 - person), drawn stretched behind
+//     the person - so nothing of the person is left in it.
+//   - The mask edge is a little tighter: smoothstep(0.45, 0.8), so less of
+//     the old background shows as a light fringe around the hair.
 
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -34,6 +47,7 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RenderEffect
 import android.graphics.RenderNode
+import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
@@ -136,9 +150,24 @@ class LabCamera(
     @Volatile private var mask: Bitmap? = null
     private val maskBytes = ByteArray(segW * segH)
 
-    // Blur (API 31+: GPU RenderEffect; older: down / up scaling).
-    private var blurNode: Any? = null
-    private var smallBlur: Bitmap? = null
+    // Clean blur background (seg thread builds it, draw() stretches it).
+    private val bgBuffers = arrayOfNulls<Bitmap>(2)
+    private var bgWrite = 0
+    @Volatile private var bgBlur: Bitmap? = null
+    private val px = IntArray(segW * segH)
+    private val chR = FloatArray(segW * segH)
+    private val chG = FloatArray(segW * segH)
+    private val chB = FloatArray(segW * segH)
+    private val chW = FloatArray(segW * segH)
+    private val tmp = FloatArray(segW * segH)
+    private val outPx = IntArray(segW * segH)
+
+    // Futuristic backgrounds (API 33+) + neon rim (API 31+).
+    private val shaderCache = HashMap<String, Any>()
+    private val shaderPaint = Paint()
+    private var glowNode: Any? = null
+    private val glowPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val t0 = SystemClock.uptimeMillis()
 
     // Stats.
     @Volatile private var lastFps = 0.0
@@ -482,8 +511,9 @@ class LabCamera(
         val fb = buf.asFloatBuffer()
         val n = minOf(fb.remaining(), maskBytes.size)
         for (i in 0 until n) {
-            // smoothstep(0.35, 0.65) - firm inside, soft 1-2 px edge.
-            var x = (fb.get(i) - 0.35f) / 0.3f
+            // smoothstep(0.45, 0.8) - firm inside, soft edge, a little
+            // inside the person so the old background doesn't fringe.
+            var x = (fb.get(i) - 0.45f) / 0.35f
             x = if (x < 0f) 0f else if (x > 1f) 1f else x
             maskBytes[i] = (x * x * (3f - 2f * x) * 255f).toInt().toByte()
         }
@@ -495,6 +525,7 @@ class LabCamera(
         mb!!.copyPixelsFromBuffer(ByteBuffer.wrap(maskBytes))
         mask = mb
         maskWrite = 1 - maskWrite
+        if (bgMode == "blur") buildCleanBlur(small)
         if (gpuTrial) {
             // The GPU made a good mask - it works on this phone.
             gpuTrial = false
@@ -512,6 +543,90 @@ class LabCamera(
         }
     }
 
+    /** Background-only blur: the person is weighted out before blurring. */
+    private fun buildCleanBlur(small: Bitmap) {
+        val n = segW * segH
+        small.getPixels(px, 0, segW, 0, 0, segW, segH)
+        var sr = 0f; var sg = 0f; var sb = 0f; var sw = 0f
+        for (i in 0 until n) {
+            val a = (maskBytes[i].toInt() and 0xFF) / 255f
+            // Anything that is even a little "person" counts as person.
+            val w = if (a > 0.08f) 0f else 1f - a
+            val c = px[i]
+            val r = ((c shr 16) and 0xFF) * w
+            val g = ((c shr 8) and 0xFF) * w
+            val bl = (c and 0xFF) * w
+            chR[i] = r; chG[i] = g; chB[i] = bl; chW[i] = w
+            sr += r; sg += g; sb += bl; sw += w
+        }
+        // Two box passes per direction ~ a soft Gaussian, radius 7 px of
+        // 144 (~35 px on a 720-wide frame).
+        for (ch in arrayOf(chR, chG, chB, chW)) {
+            for (pass in 0 until 2) {
+                boxH(ch, 7)
+                boxV(ch, 7)
+            }
+        }
+        val avgR = if (sw > 0f) sr / sw else 40f
+        val avgG = if (sw > 0f) sg / sw else 40f
+        val avgB = if (sw > 0f) sb / sw else 40f
+        for (i in 0 until n) {
+            val w = chW[i]
+            val r: Float; val g: Float; val bl: Float
+            if (w > 0.03f) {
+                r = chR[i] / w; g = chG[i] / w; bl = chB[i] / w
+            } else {
+                r = avgR; g = avgG; bl = avgB
+            }
+            outPx[i] = (0xFF shl 24) or (r.toInt().coerceIn(0, 255) shl 16) or
+                (g.toInt().coerceIn(0, 255) shl 8) or bl.toInt().coerceIn(0, 255)
+        }
+        var ob = bgBuffers[bgWrite]
+        if (ob == null) {
+            ob = Bitmap.createBitmap(segW, segH, Bitmap.Config.ARGB_8888)
+            bgBuffers[bgWrite] = ob
+        }
+        ob!!.setPixels(outPx, 0, segW, 0, 0, segW, segH)
+        bgBlur = ob
+        bgWrite = 1 - bgWrite
+    }
+
+    /** Horizontal box blur (running sum, edges clamped), in place. */
+    private fun boxH(a: FloatArray, r: Int) {
+        val w = segW
+        val div = (2 * r + 1).toFloat()
+        for (y in 0 until segH) {
+            val row = y * w
+            var acc = 0f
+            for (k in -r..r) acc += a[row + k.coerceIn(0, w - 1)]
+            for (x in 0 until w) {
+                tmp[row + x] = acc / div
+                val add = a[row + (x + r + 1).coerceAtMost(w - 1)]
+                val sub = a[row + (x - r).coerceAtLeast(0)]
+                acc += add - sub
+            }
+        }
+        System.arraycopy(tmp, 0, a, 0, segW * segH)
+    }
+
+    /** Vertical box blur (running sum, edges clamped), in place. */
+    private fun boxV(a: FloatArray, r: Int) {
+        val w = segW
+        val h = segH
+        val div = (2 * r + 1).toFloat()
+        for (x in 0 until w) {
+            var acc = 0f
+            for (k in -r..r) acc += a[k.coerceIn(0, h - 1) * w + x]
+            for (y in 0 until h) {
+                tmp[y * w + x] = acc / div
+                val add = a[(y + r + 1).coerceAtMost(h - 1) * w + x]
+                val sub = a[(y - r).coerceAtLeast(0) * w + x]
+                acc += add - sub
+            }
+        }
+        System.arraycopy(tmp, 0, a, 0, segW * segH)
+    }
+
     private fun draw(b: Bitmap) {
         val s = surface ?: return
         val canvas = try { s.lockHardwareCanvas() } catch (_: Throwable) { null } ?: return
@@ -524,12 +639,19 @@ class LabCamera(
             } else {
                 // 1) background
                 when (mode) {
-                    "blur" -> drawBlur(canvas, b, dst)
+                    "blur" -> {
+                        val bg = bgBlur
+                        if (bg != null) canvas.drawBitmap(bg, null, dst, paint)
+                        else canvas.drawBitmap(b, null, dst, paint)
+                    }
                     "mask" -> {
                         canvas.drawColor(Color.BLACK)
                         canvas.drawBitmap(m, null, dst, maskViewPaint)
                     }
-                    else -> canvas.drawColor(Color.BLACK)
+                    else -> {
+                        drawShaderBackground(canvas, dst, mode)
+                        drawGlow(canvas, m, dst, LabBackgrounds.glow[mode] ?: Color.CYAN)
+                    }
                 }
                 // 2) the person, cut out by the mask
                 if (mode != "mask") {
@@ -544,28 +666,52 @@ class LabCamera(
         }
     }
 
-    private fun drawBlur(canvas: Canvas, b: Bitmap, dst: Rect) {
-        if (Build.VERSION.SDK_INT >= 31 && canvas.isHardwareAccelerated) {
-            var node = blurNode as RenderNode?
+    /** A futuristic GPU background (Android 13+; older: dark gradient). */
+    private fun drawShaderBackground(canvas: Canvas, dst: Rect, mode: String) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            val src = LabBackgrounds.shaders[mode]
+            if (src != null) {
+                try {
+                    val sh = shaderCache.getOrPut(mode) { RuntimeShader(src) } as RuntimeShader
+                    sh.setFloatUniform("iResolution",
+                        dst.width().toFloat(), dst.height().toFloat())
+                    sh.setFloatUniform("iTime",
+                        (SystemClock.uptimeMillis() - t0) / 1000f)
+                    shaderPaint.shader = sh
+                    canvas.drawRect(dst, shaderPaint)
+                    return
+                } catch (e: Throwable) {
+                    Log.e(tag, "shader $mode", e)
+                    shaderCache.remove(mode)
+                }
+            }
+        }
+        canvas.drawColor(Color.rgb(10, 4, 30))
+    }
+
+    /** Neon rim: the person's mask, tinted and blurred, behind the person
+     *  (Android 12+ RenderEffect; nothing on older phones). */
+    private fun drawGlow(canvas: Canvas, m: Bitmap, dst: Rect, color: Int) {
+        if (Build.VERSION.SDK_INT < 31 || !canvas.isHardwareAccelerated) return
+        try {
+            var node = glowNode as RenderNode?
             if (node == null) {
-                node = RenderNode("labBlur")
-                blurNode = node
+                node = RenderNode("labGlow")
+                glowNode = node
             }
             node.setPosition(0, 0, dst.width(), dst.height())
-            node.setRenderEffect(RenderEffect.createBlurEffect(
-                dst.width() / 18f, dst.width() / 18f, Shader.TileMode.CLAMP))
+            val r = dst.width() / 45f
+            node.setRenderEffect(RenderEffect.createBlurEffect(r, r, Shader.TileMode.DECAL))
+            glowPaint.color = color
             val rc = node.beginRecording()
-            rc.drawBitmap(b, null, dst, paint)
+            // Slightly larger than the person, so the light shows around it.
+            val grow = dst.width() / 90
+            rc.drawBitmap(m, null, Rect(dst.left - grow, dst.top - grow,
+                dst.right + grow, dst.bottom + grow), glowPaint)
             node.endRecording()
             canvas.drawRenderNode(node)
-        } else {
-            var sb = smallBlur
-            if (sb == null) {
-                sb = Bitmap.createBitmap(36, 64, Bitmap.Config.ARGB_8888)
-                smallBlur = sb
-            }
-            Canvas(sb!!).drawBitmap(b, null, Rect(0, 0, 36, 64), paint)
-            canvas.drawBitmap(sb, null, dst, paint)
+        } catch (e: Throwable) {
+            Log.e(tag, "glow", e)
         }
     }
 

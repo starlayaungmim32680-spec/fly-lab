@@ -8,6 +8,11 @@
 // measuring tool: camera fps, segmentation time / runs per second, and
 // whether the model runs on the GPU or the CPU (16 Nov 2026: plus the last
 // Java crash, if the app closed itself - long-press LAB to clear it).
+//
+// Step 3 (16 Nov 2026): 6 futuristic animated backgrounds (City, Warp,
+// Matrix, Grid, Aurora, Chrome - GPU shaders in LabBackgrounds.kt) with a
+// neon rim around the person, and a cleaner Blur (no grey halo). The choice
+// row scrolls sideways.
 import 'dart:async';
 import 'dart:math';
 
@@ -46,7 +51,7 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
   int? _textureId;
   double _aspect = 9 / 16;
   bool _front = true;
-  String _mode = 'blur';
+  String _mode = 'city';
   String? _error;
   // The read-out redraws alone (ValueNotifier), not the whole camera.
   final ValueNotifier<String> _stats = ValueNotifier<String>('');
@@ -55,6 +60,12 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
   static const List<(String, String, IconData)> _modes = [
     ('none', 'Off', Icons.block),
     ('blur', 'Blur', Icons.blur_on),
+    ('city', 'City', Icons.location_city),
+    ('warp', 'Warp', Icons.rocket_launch),
+    ('matrix', 'Matrix', Icons.code),
+    ('grid', 'Grid', Icons.grid_on),
+    ('aurora', 'Aurora', Icons.auto_awesome),
+    ('chrome', 'Chrome', Icons.water_drop),
     ('mask', 'Mask', Icons.person_outline),
   ];
 
@@ -202,20 +213,25 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
             left: 0,
             right: 0,
             bottom: MediaQuery.paddingOf(context).bottom + 24,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (final (String key, String label, IconData icon) in _modes)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: _ModeChip(
-                      label: label,
-                      icon: icon,
-                      selected: _mode == key,
-                      onTap: () => _setMode(key),
+            child: SizedBox(
+              height: 76,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  for (final (String key, String label, IconData icon)
+                      in _modes)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      child: _ModeChip(
+                        label: label,
+                        icon: icon,
+                        selected: _mode == key,
+                        onTap: () => _setMode(key),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ],

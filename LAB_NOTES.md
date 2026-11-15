@@ -43,8 +43,27 @@ Build (arm64 only, ~20-150 s):
   3. MediaPipe Tasks send anonymous usage metrics to Google (their docs) -
      mention in Fly's privacy policy when merged.
 
+## Step 3 - futuristic backgrounds + halo fix: WORKS (16 Nov 2026)
+- `LabBackgrounds.kt`: 6 AGSL RuntimeShader backgrounds (Android 13+):
+  city (synthwave sun + skyline + grid floor), warp (star streaks), matrix
+  (green glyph rain), grid (hologram room), aurora (stars + light curtains),
+  chrome (liquid metal). Neon rim glow (mask tinted + RenderEffect blur,
+  Android 12+) in each background's colour.
+- Blur halo fix: the seg thread builds a clean background from the 144x256
+  copy with the person weighted out (weighted box blur, r = 7, 2 passes) -
+  no person colours left in it. Mask edge smoothstep(0.45, 0.8).
+- Ko's phone (screenshots 01:17-01:18): camera 24-25 fps with the shaders
+  (no fps drop), mask 32-40 ms (17-21/s, CPU). City / Warp / Matrix look
+  right; **Blur halo is gone**.
+- Still to improve: on the bright-room shaders a thin **white fringe** of the
+  old background around the hair / shoulders, the edge is a little
+  **stair-stepped** (the model works at 256x256), and things touching the
+  person (a ceiling lamp behind the head) count as "person". Idea: a thin
+  neon outline drawn ON the edge band (4*m*(1-m)) + smoothing the mask over
+  time.
+
 ## Plan (Ko, 15 Nov 2026)
-1. ~~Lab + GPUPixel camera~~ 2. ~~Blur~~ 3. Futuristic backgrounds (GPU
+1. ~~Lab + GPUPixel camera~~ 2. ~~Blur~~ 3. ~~Futuristic backgrounds~~ (edge polish open) (GPU
 shaders: cyber city, warp tunnel, matrix rain, hologram grid, galaxy /
 aurora, liquid chrome) + the user's own photo / video 4. Record (baked into
 the mp4) 5. Futuristic "outfit" effects on the clothes (MediaPipe multiclass
