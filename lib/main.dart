@@ -1,121 +1,289 @@
+// Fly Lab (15 Nov 2026) - Ko's test bench for Fly camera effects.
+// Effects are built and tested here first; only what works on Ko's phone is
+// copied into Fly. Not published, no Firebase, no login.
+//
+// Step 1: GPUPixel beauty camera + person segmentation (MediaPipe) + the
+// first background: Blur. "Mask" shows only the cut-out (cyan = person) so
+// Ko can see how clean the edges are. The top read-out is the Lab's own
+// measuring tool: camera fps, segmentation time / runs per second, and
+// whether the model runs on the GPU or the CPU (16 Nov 2026: plus the last
+// Java crash, if the app closed itself - long-press LAB to clear it).
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const FlyLabApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class FlyLabApp extends StatelessWidget {
+  const FlyLabApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'Fly Lab',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark(useMaterial3: true),
+      home: const LabCameraScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class LabCameraScreen extends StatefulWidget {
+  const LabCameraScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<LabCameraScreen> createState() => _LabCameraScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _LabCameraScreenState extends State<LabCameraScreen> {
+  static const MethodChannel _ch = MethodChannel('flylab/camera');
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  int? _textureId;
+  double _aspect = 9 / 16;
+  bool _front = true;
+  String _mode = 'blur';
+  String? _error;
+  // The read-out redraws alone (ValueNotifier), not the whole camera.
+  final ValueNotifier<String> _stats = ValueNotifier<String>('');
+  Timer? _statsTimer;
+
+  static const List<(String, String, IconData)> _modes = [
+    ('none', 'Off', Icons.block),
+    ('blur', 'Blur', Icons.blur_on),
+    ('mask', 'Mask', Icons.person_outline),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+    _statsTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _pollStats());
+  }
+
+  Future<void> _start() async {
+    final PermissionStatus st = await Permission.camera.request();
+    if (!st.isGranted) {
+      if (mounted) setState(() => _error = 'Camera permission is needed.');
+      return;
+    }
+    try {
+      final Map<dynamic, dynamic>? r = await _ch
+          .invokeMapMethod<dynamic, dynamic>('start', {'front': _front});
+      if (r == null || !mounted) return;
+      await _ch.invokeMethod('setBackground', {'mode': _mode});
+      setState(() {
+        _textureId = (r['textureId'] as num).toInt();
+        _aspect = (r['width'] as num) / (r['height'] as num);
+        _front = r['front'] == true;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Camera could not start: $e');
+    }
+  }
+
+  Future<void> _pollStats() async {
+    if (_textureId == null) return;
+    try {
+      final Map<dynamic, dynamic>? r =
+          await _ch.invokeMapMethod<dynamic, dynamic>('stats');
+      if (r == null || !mounted) return;
+      final double fps = (r['fps'] as num?)?.toDouble() ?? 0;
+      final double segMs = (r['segMs'] as num?)?.toDouble() ?? 0;
+      final double segFps = (r['segFps'] as num?)?.toDouble() ?? 0;
+      final String crash = (r['lastCrash'] as String?) ?? '';
+      _stats.value = 'camera ${fps.toStringAsFixed(0)} fps · '
+          'mask ${segMs.toStringAsFixed(0)} ms '
+          '(${segFps.toStringAsFixed(0)}/s) · ${r['delegate']}'
+          '${crash.isEmpty ? '' : '\nlast crash: $crash'}';
+    } catch (_) {}
+  }
+
+  Future<void> _setMode(String m) async {
+    setState(() => _mode = m);
+    try {
+      await _ch.invokeMethod('setBackground', {'mode': m});
+    } catch (_) {}
+  }
+
+  Future<void> _flip() async {
+    try {
+      final Map<dynamic, dynamic>? r =
+          await _ch.invokeMapMethod<dynamic, dynamic>('switchCamera');
+      if (r == null || !mounted) return;
+      setState(() {
+        _aspect = (r['width'] as num) / (r['height'] as num);
+        _front = r['front'] == true;
+      });
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _statsTimer?.cancel();
+    _stats.dispose();
+    _ch.invokeMethod('stop');
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final int? id = _textureId;
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (id != null)
+            ClipRect(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: 720,
+                  height: 720 / _aspect,
+                  child: _front
+                      ? Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.rotationY(pi),
+                          child: Texture(textureId: id),
+                        )
+                      : Texture(textureId: id),
+                ),
+              ),
+            )
+          else
+            Center(
+              child: _error == null
+                  ? const CircularProgressIndicator()
+                  : Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(_error!, textAlign: TextAlign.center),
+                    ),
             ),
-          ],
+          // Lab read-out (top).
+          Positioned(
+            left: 12,
+            right: 12,
+            top: MediaQuery.paddingOf(context).top + 10,
+            child: Row(
+              children: [
+                GestureDetector(
+                  onLongPress: () => _ch.invokeMethod('clearCrash'),
+                  child: const _LabBadge(),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ValueListenableBuilder<String>(
+                    valueListenable: _stats,
+                    builder: (context, t, _) => Text(
+                      t,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        shadows: [Shadow(blurRadius: 4)],
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: _flip,
+                  icon: const Icon(Icons.flip_camera_ios_outlined),
+                ),
+              ],
+            ),
+          ),
+          // Background choices (bottom).
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: MediaQuery.paddingOf(context).bottom + 24,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (final (String key, String label, IconData icon) in _modes)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: _ModeChip(
+                      label: label,
+                      icon: icon,
+                      selected: _mode == key,
+                      onTap: () => _setMode(key),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LabBadge extends StatelessWidget {
+  const _LabBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFF4B6E), Color(0xFF9C4DFF)],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+      child: const Text('LAB',
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
+    );
+  }
+}
+
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 72,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? null : Colors.black54,
+          gradient: selected
+              ? const LinearGradient(
+                  colors: [Color(0xFF00E5FF), Color(0xFF9C4DFF)],
+                )
+              : null,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 24),
+            const SizedBox(height: 4),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w700)),
+          ],
+        ),
       ),
     );
   }
