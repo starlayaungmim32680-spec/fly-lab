@@ -24,6 +24,9 @@ package com.aungdev.fly_lab
 // Channel "flylab/editor":
 //   load {path}                     -> {textureId, width, height}
 //   setTemplate {id}                -> null
+//   thumbs                          -> {id: jpeg bytes} (step 4: a 180x320
+//                                      preview card of EVERY template made
+//                                      from the user's photo)
 //   setParams {adj: [8 doubles], seconds} -> null
 //       adj = brightness, contrast, saturation, warmth,
 //             vignette, grain, filter id, filter strength
@@ -62,6 +65,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -252,6 +256,7 @@ class PhotoVideoEngine(
                 }
                 result.success(null)
             }
+            "thumbs" -> thumbs(result)
             "progress" -> result.success(progress)
             "dispose" -> {
                 stopPreview()
@@ -336,6 +341,63 @@ class PhotoVideoEngine(
             } catch (e: Throwable) {
                 Log.e(tag, "preview", e)
                 main.post { result.error("preview_failed", e.toString(), null) }
+            }
+        }
+    }
+
+    /** Renders every template once (small) into an offscreen texture on the
+     *  preview thread and returns JPEG cards for the template panel. */
+    private fun thumbs(result: MethodChannel.Result) {
+        val h = pHandler ?: return result.error("no_photo", "No photo", null)
+        h.post {
+            val fb = IntArray(1)
+            val tx = IntArray(1)
+            try {
+                val r = pRenderer ?: error("no renderer")
+                val tw = 180
+                val th = 320
+                GLES20.glGenFramebuffers(1, fb, 0)
+                GLES20.glGenTextures(1, tx, 0)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tx[0])
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, tw, th, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fb[0])
+                GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                    GLES20.GL_TEXTURE_2D, tx[0], 0)
+                val buf = ByteBuffer.allocateDirect(tw * th * 4).order(ByteOrder.nativeOrder())
+                val px = IntArray(tw * th)
+                val neutral = floatArrayOf(0f, 1f, 1f, 0f, 0f, 0f, 0f, 1f)
+                val out = HashMap<String, ByteArray>()
+                for (id in PhotoTemplates.fragments.keys) {
+                    r.draw(id, PhotoTemplates.thumbTime(id), 8f, tw, th, neutral)
+                    buf.rewind()
+                    GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+                    for (y in 0 until th) {
+                        val src = (th - 1 - y) * tw * 4
+                        for (x in 0 until tw) {
+                            val i = src + x * 4
+                            val rr = buf.get(i).toInt() and 0xFF
+                            val gg = buf.get(i + 1).toInt() and 0xFF
+                            val bb = buf.get(i + 2).toInt() and 0xFF
+                            px[y * tw + x] = (0xFF shl 24) or (rr shl 16) or (gg shl 8) or bb
+                        }
+                    }
+                    val bm = Bitmap.createBitmap(px, tw, th, Bitmap.Config.ARGB_8888)
+                    val bos = ByteArrayOutputStream()
+                    bm.compress(Bitmap.CompressFormat.JPEG, 82, bos)
+                    bm.recycle()
+                    out[id] = bos.toByteArray()
+                }
+                main.post { result.success(out) }
+            } catch (e: Throwable) {
+                Log.e(tag, "thumbs", e)
+                main.post { result.error("thumbs_failed", e.toString(), null) }
+            } finally {
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+                if (fb[0] != 0) GLES20.glDeleteFramebuffers(1, fb, 0)
+                if (tx[0] != 0) GLES20.glDeleteTextures(1, tx, 0)
             }
         }
     }

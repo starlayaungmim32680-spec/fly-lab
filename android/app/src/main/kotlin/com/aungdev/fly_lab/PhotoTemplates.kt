@@ -13,6 +13,10 @@ package com.aungdev.fly_lab
 //   10 new templates (no cut-out needed): Dreamy, Heartbeat, Glitch,
 //   Sad Rain, Golden Hour, Flash Beat, Memory (polaroid), Neon Lines,
 //   Snow Sparkle, Focus In.
+//   Step 4 (17 Nov 2026): the LIBRARY - 22 more (35 in all), each in ONE
+//   category: Love, Beat, Cinema, Feel, Night, Fun, Retro (the app's
+//   category list lives in editor_lab.dart). Shared helpers in COMMON:
+//   heartD (heart shape), vnoise / fbm (soft noise), hueShift.
 //   Every template ends with finish(c): the user's FILTER (with strength)
 //   and ADJUST sliders (brightness, contrast, saturation, warmth, vignette,
 //   grain) are applied on top, then the fade in / out.
@@ -85,6 +89,41 @@ float fadeInOut() {
 }
 // Round-looking distance on the 9:16 frame.
 vec2 aspectD(vec2 a, vec2 b) { return (a - b) * vec2(uOutAspect, 1.0); }
+// Heart shape (> 0 inside), p about -1..1, point down, y up.
+float heartD(vec2 p) {
+    p.y -= 0.25;
+    float a = atan(p.x, p.y) / 3.141593;
+    float r = length(p);
+    float h = abs(a);
+    float d = (13.0 * h - 22.0 * h * h + 10.0 * h * h * h) / (6.0 - 5.0 * h);
+    return d - r;
+}
+float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+float fbm(vec2 p) {
+    float s = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
+    return s;
+}
+vec3 hueShift(vec3 c, float ang) {
+    mat3 toY = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
+    mat3 toR = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
+    vec3 y = toY * c;
+    float h = atan(y.z, y.y) + ang;
+    float ch = length(y.yz);
+    y.y = ch * cos(h);
+    y.z = ch * sin(h);
+    return toR * y;
+}
 
 // The user's filters: 0 none, 1 vivid, 2 warm, 3 cool, 4 b&w, 5 fade,
 // 6 pink, 7 moody.
@@ -231,14 +270,7 @@ void main() {
     /** Heartbeat (love): pink glow, a double "thump-thump" zoom like a heart
      *  beat, little hearts floating up. */
     private const val HEARTBEAT = COMMON + """
-float heart(vec2 p) {
-    p.y -= 0.25;
-    float a = atan(p.x, p.y) / 3.141593;
-    float r = length(p);
-    float h = abs(a);
-    float d = (13.0 * h - 22.0 * h * h + 10.0 * h * h * h) / (6.0 - 5.0 * h);
-    return smoothstep(-0.06, 0.04, d - r);
-}
+float heart(vec2 p) { return smoothstep(-0.06, 0.04, heartD(p)); }
 void main() {
     float b = fract(uTime * 1.1);
     float thump = exp(-b * 14.0) + 0.7 * step(0.22, b) * exp(-(b - 0.22) * 14.0);
@@ -487,6 +519,465 @@ void main() {
 }
 """
 
+    // ================================================== step 4 library
+
+    // ---------------- Love
+    /** Pink Sparkle: pink glow grade, glitter stars twinkling in two sizes. */
+    private const val PINK_SPARKLE = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.08 * e, vec2(0.0)));
+    c = mix(c, c * vec3(1.08, 0.92, 1.04) + vec3(0.06, 0.01, 0.05), 0.8);
+    c = c * 0.92 + 0.06;
+    for (int i = 0; i < 2; i++) {
+        float fi = float(i);
+        vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * (14.0 + fi * 12.0);
+        g.y -= uTime * 0.15 * (1.0 + fi);
+        vec2 cell = floor(g);
+        float hs = hash(cell + fi * 9.0);
+        if (hs > 0.88) {
+            vec2 f = fract(g) - 0.5 - (vec2(hash(cell + 1.7), hash(cell + 4.3)) - 0.5) * 0.5;
+            float tw = pow(0.5 + 0.5 * sin(uTime * (3.0 + 4.0 * hs) + hs * 60.0), 3.0);
+            float st = max(0.0, 1.0 - abs(f.x) * 14.0 - abs(f.y) * 2.5) + max(0.0, 1.0 - abs(f.y) * 14.0 - abs(f.x) * 2.5);
+            st += smoothstep(0.12, 0.0, length(f));
+            c += vec3(1.0, 0.8, 0.92) * st * tw * 0.6;
+        }
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Love Frame: the whole photo placed inside a big heart that beats,
+     *  pink glowing rim, a soft blurred dark-pink copy around it. */
+    private const val LOVE_FRAME = COMMON + """
+void main() {
+    float b = fract(uTime * 1.1);
+    float thump = exp(-b * 14.0) + 0.7 * step(0.22, b) * exp(-(b - 0.22) * 14.0);
+    float grow = ease(uTime / 0.8);
+    float size = 0.40 * mix(0.2, 1.0, grow) * (1.0 + 0.04 * thump);
+    vec2 cen = vec2(0.5, 0.50);
+    vec2 q = aspectD(vUv, cen) / size;
+    float hd = heartD(q);
+    float inside = smoothstep(-0.015, 0.015, hd);
+    // Photo fitted to the heart's box (about 1.32 x 1.30 heart units),
+    // keeping more of the top (faces).
+    vec2 iuv = vec2(q.x / 1.32 + 0.5, (q.y + 0.75) / 1.30);
+    float boxA = 1.32 / 1.30;
+    vec2 tc = coverBox(iuv, boxA);
+    if (uImgAspect < boxA) tc.y -= (1.0 - uImgAspect / boxA) * 0.35;
+    vec3 p = photo(tc);
+    vec2 btc = coverUv(vUv, 1.2, vec2(0.0));
+    vec3 bg = vec3(0.0);
+    for (int i = 0; i < 8; i++) {
+        float a = float(i) * 0.785398;
+        bg += photo(btc + vec2(cos(a), sin(a)) * 0.03);
+    }
+    bg = mix(vec3(luma(bg / 8.0)), bg / 8.0, 0.5) * 0.4 + vec3(0.20, 0.03, 0.09);
+    vec3 c = mix(bg, p, inside);
+    float rim = exp(-abs(hd) * 28.0);
+    c += vec3(1.0, 0.35, 0.6) * rim * (0.55 + 0.45 * thump);
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Petals: soft pink petals drifting down and flipping. */
+    private const val PETALS = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.08 * e, vec2(0.0)));
+    c = mix(c, c * vec3(1.05, 0.96, 0.98) + vec3(0.04, 0.01, 0.02), 0.7);
+    for (int i = 0; i < 16; i++) {
+        float fi = float(i);
+        float sp = 0.05 + 0.05 * hash(vec2(fi, 1.0));
+        float y = 1.1 - fract(hash(vec2(fi, 2.0)) + uTime * sp) * 1.25;
+        float x = fract(hash(vec2(fi, 3.0)) + uTime * 0.03) + 0.05 * sin(uTime + fi);
+        vec2 q = aspectD(vUv, vec2(x, y));
+        float a = uTime * (1.0 + hash(vec2(fi, 4.0))) + fi;
+        q = vec2(cos(a) * q.x + sin(a) * q.y, -sin(a) * q.x + cos(a) * q.y);
+        float sz = 0.016 + 0.012 * hash(vec2(fi, 5.0));
+        q /= sz;
+        q.x /= 0.25 + 0.75 * abs(cos(uTime * 2.0 + fi));
+        q.y *= 1.6;
+        float m = smoothstep(1.0, 0.75, length(q));
+        vec3 col = mix(vec3(1.0, 0.55, 0.7), vec3(1.0, 0.88, 0.92), clamp(0.5 + 0.5 * q.y, 0.0, 1.0));
+        c = mix(c, col, m * 0.9);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Beat
+    /** Shake: on every beat the camera shakes with motion blur, then calms. */
+    private const val SHAKE = COMMON + """
+void main() {
+    float fr = fract(uTime * 2.0);
+    float n = floor(uTime * 2.0);
+    float amp = exp(-fr * 6.0);
+    vec2 dir = normalize(vec2(hash(vec2(n, 1.0)) - 0.5, hash(vec2(n, 2.0)) - 0.5) + 0.001);
+    vec2 off = dir * sin(fr * 40.0) * 0.03 * amp;
+    vec3 c = vec3(0.0);
+    for (int i = 0; i < 6; i++) {
+        float fi = float(i) / 5.0;
+        c += photo(coverUv(vUv + off * (0.3 + fi), 1.12 + 0.03 * amp, vec2(0.0)));
+    }
+    c /= 6.0;
+    c = (c - 0.5) * (1.0 + 0.2 * amp) + 0.5;
+    vec2 d = vUv - 0.5;
+    c *= 1.0 - dot(d, d) * 0.7;
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Split: on each beat the frame splits into 1, 2, 3 then 4 panels. */
+    private const val SPLIT = COMMON + """
+void main() {
+    float bt = uTime * 2.0;
+    float n = mod(floor(bt), 4.0);
+    float fr = fract(bt);
+    vec2 grid = vec2(1.0, 1.0);
+    if (n > 0.5) grid = vec2(1.0, 2.0);
+    if (n > 1.5) grid = vec2(1.0, 3.0);
+    if (n > 2.5) grid = vec2(2.0, 2.0);
+    vec2 g = vUv * grid;
+    vec2 cell = floor(g);
+    vec2 iuv = fract(g);
+    float pa = uOutAspect * grid.y / grid.x;
+    float z = 1.0 + 0.08 * exp(-fr * 5.0) + 0.04 * hash(cell + n);
+    vec3 c = photo(coverBox((iuv - 0.5) / z + 0.5, pa));
+    float dx = min(iuv.x, 1.0 - iuv.x) * uRes.x / grid.x;
+    float dy = min(iuv.y, 1.0 - iuv.y) * uRes.y / grid.y;
+    float edge = 1.0 - smoothstep(2.0, 4.0, min(dx, dy));
+    c = mix(c, vec3(1.0), edge * step(1.5, grid.x * grid.y));
+    c += exp(-fr * 10.0) * 0.25;
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Zoom Blur: a burst of radial zoom blur and light on every beat. */
+    private const val ZOOM_BLUR = COMMON + """
+void main() {
+    float fr = fract(uTime * 1.5);
+    float amp = exp(-fr * 5.0);
+    vec3 c = vec3(0.0);
+    for (int i = 0; i < 10; i++) {
+        float s = 1.0 - amp * 0.12 * float(i) / 9.0;
+        c += photo(coverUv((vUv - 0.5) * s + 0.5, 1.06 + 0.10 * amp, vec2(0.0)));
+    }
+    c /= 10.0;
+    c += amp * 0.15;
+    c = (c - 0.5) * 1.1 + 0.5;
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Cinema
+    /** Letterbox: black movie bars slide in, cool film grade, slow side pan. */
+    private const val LETTERBOX = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    float bars = ease(uTime / 1.0) * 0.12;
+    vec3 c = photo(coverUv(vUv, 1.15, vec2(mix(-0.04, 0.04, e), 0.0)));
+    float l = luma(c);
+    c = mix(vec3(l), c, 0.75);
+    c = mix(c * vec3(0.85, 1.0, 1.06), c * vec3(1.1, 1.0, 0.86), l);
+    c = (c - 0.5) * 1.12 + 0.48;
+    c *= step(bars, vUv.y) * step(vUv.y, 1.0 - bars);
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Ken Burns: the classic slow zoom + diagonal glide across the photo. */
+    private const val KEN_BURNS = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, mix(1.30, 1.10, e), vec2(mix(-0.05, 0.05, e), mix(0.04, -0.03, e))));
+    c = (c - 0.5) * 1.05 + 0.5;
+    vec2 d = vUv - 0.5;
+    c *= 1.0 - dot(d, d) * 0.6;
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Light Leak: warm orange and pink light blobs drifting over the photo. */
+    private const val LIGHT_LEAK = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.07 * e, vec2(0.0)));
+    vec2 p1 = vec2(-0.2 + 1.4 * fract(uTime * 0.09), 0.75 + 0.15 * sin(uTime * 0.5));
+    vec2 p2 = vec2(1.2 - 1.4 * fract(uTime * 0.07 + 0.4), 0.25 + 0.1 * cos(uTime * 0.6));
+    float d1 = length(aspectD(vUv, p1));
+    float d2 = length(aspectD(vUv, p2));
+    vec3 leak = vec3(1.0, 0.45, 0.15) * exp(-d1 * d1 * 9.0) + vec3(1.0, 0.2, 0.6) * exp(-d2 * d2 * 9.0);
+    c = 1.0 - (1.0 - c) * (1.0 - leak * 0.75);
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Feel
+    /** Color Return: starts black & white, colour spreads out from the
+     *  middle. */
+    private const val COLOR_RETURN = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.08 * e, vec2(0.0)));
+    float k = ease((uTime - 0.8) / (uDur * 0.6));
+    float reach = k * 0.75;
+    float r = length(aspectD(vUv, vec2(0.5)));
+    float m = 1.0 - smoothstep(reach - 0.15, reach, r);
+    m *= step(0.001, k);
+    vec3 bw = vec3((luma(c) - 0.5) * 1.1 + 0.5);
+    c = mix(bw, c * 1.04, m);
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Fog: soft mist drifting across, stronger near the bottom. */
+    private const val FOG = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.06 * e, vec2(0.0)));
+    c = mix(vec3(luma(c)), c, 0.8) * vec3(0.95, 1.0, 1.03);
+    float f = fbm(vec2(vUv.x * uOutAspect * 3.0 + uTime * 0.08, vUv.y * 3.0 - uTime * 0.02));
+    float f2 = fbm(vec2(vUv.x * uOutAspect * 6.0 - uTime * 0.05, vUv.y * 5.0) + 7.0);
+    float amt = smoothstep(0.35, 0.8, f * 0.7 + f2 * 0.4) * (0.45 + 0.55 * (1.0 - vUv.y));
+    c = mix(c, vec3(0.86, 0.89, 0.93), amt * 0.65);
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Lonely: a slow pull back, faded cool colours, the dark closes in. */
+    private const val LONELY = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, mix(1.30, 1.02, e), vec2(0.0, 0.01 * e)));
+    c = mix(vec3(luma(c)), c, 0.35) * vec3(0.88, 0.95, 1.08);
+    c *= 0.95 + 0.05 * sin(uTime * 1.2);
+    vec2 d = vUv - 0.5;
+    c *= 1.0 - dot(d, d) * mix(0.6, 2.2, e);
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Night
+    /** Fireflies: night tint, warm glowing dots wandering and blinking. */
+    private const val FIREFLIES = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.06 * e, vec2(0.0)));
+    c = c * 0.55 * vec3(0.82, 0.95, 1.12);
+    for (int i = 0; i < 18; i++) {
+        float fi = float(i);
+        vec2 p = vec2(hash(vec2(fi, 1.0)), hash(vec2(fi, 2.0)) * 0.9 + 0.05);
+        p += 0.08 * vec2(sin(uTime * 0.5 * (hash(vec2(fi, 3.0)) + 0.5) + fi), cos(uTime * 0.4 * (hash(vec2(fi, 4.0)) + 0.5) + fi * 1.3));
+        float blink = 0.5 + 0.5 * sin(uTime * (1.5 + 2.0 * hash(vec2(fi, 5.0))) + fi * 3.0);
+        float d = length(aspectD(vUv, p));
+        float g = exp(-d * d * 6000.0) + exp(-d * d * 300.0) * 0.35;
+        c += vec3(1.0, 0.88, 0.4) * g * blink;
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Starry Night: deep blue night, stars twinkling in the dark parts,
+     *  a shooting star every few seconds. */
+    private const val STARRY = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 p = photo(coverUv(vUv, 1.04 + 0.06 * e, vec2(0.0)));
+    vec3 c = p * vec3(0.6, 0.7, 1.0) * 0.8 + vec3(0.0, 0.02, 0.08);
+    float dark = (1.0 - luma(p)) * smoothstep(0.25, 0.85, vUv.y);
+    vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * 40.0;
+    vec2 cell = floor(g);
+    float hs = hash(cell);
+    if (hs > 0.92) {
+        vec2 f = fract(g) - 0.5 - (vec2(hash(cell + 2.0), hash(cell + 5.0)) - 0.5) * 0.6;
+        float tw = 0.4 + 0.6 * pow(0.5 + 0.5 * sin(uTime * (2.0 + 3.0 * hs) + hs * 50.0), 2.0);
+        c += vec3(0.9, 0.95, 1.0) * smoothstep(0.09, 0.0, length(f)) * tw * (0.25 + dark) * 1.4;
+    }
+    float sn = floor(uTime / 3.0);
+    float sk = fract(uTime / 3.0) / 0.3;
+    if (sk < 1.0) {
+        vec2 a = vec2(0.2 + 0.6 * hash(vec2(sn, 1.0)), 0.95);
+        vec2 dir = normalize(vec2(0.6, -0.35));
+        vec2 head = a + dir * sk * 0.5;
+        vec2 q = aspectD(vUv, head);
+        vec2 dd = dir * vec2(uOutAspect, 1.0);
+        float along = dot(q, -normalize(dd));
+        float side = abs(dot(q, vec2(-normalize(dd).y, normalize(dd).x)));
+        float tail = smoothstep(0.15, 0.0, along) * step(0.0, along) * (1.0 - smoothstep(0.0, 0.004, side));
+        c += vec3(1.0) * tail * (1.0 - sk);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Fun
+    /** Confetti: colourful paper pieces raining down and fluttering. */
+    private const val CONFETTI = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.06 * e, vec2(0.0)));
+    c = (c - 0.5) * 1.06 + 0.52;
+    for (int i = 0; i < 40; i++) {
+        float fi = float(i);
+        float sp = 0.10 + 0.08 * hash(vec2(fi, 1.0));
+        float y = 1.1 - fract(hash(vec2(fi, 2.0)) + uTime * sp) * 1.25;
+        float x = hash(vec2(fi, 3.0)) + 0.04 * sin(uTime * 2.0 + fi);
+        vec2 q = aspectD(vUv, vec2(x, y));
+        float a = uTime * (2.0 + 2.0 * hash(vec2(fi, 4.0))) + fi;
+        q = vec2(cos(a) * q.x + sin(a) * q.y, -sin(a) * q.x + cos(a) * q.y);
+        float fl = abs(cos(uTime * 4.0 + fi * 1.7));
+        float m = step(abs(q.x), 0.013) * step(abs(q.y), 0.008 * fl + 0.0015);
+        vec3 col = clamp(hueShift(vec3(1.0, 0.25, 0.3), hash(vec2(fi, 5.0)) * 6.283), 0.0, 1.0);
+        c = mix(c, col * (0.7 + 0.3 * fl), m);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Mirror: on each beat the photo flips into a new mirror pattern. */
+    private const val MIRROR = COMMON + """
+void main() {
+    float n = mod(floor(uTime * 1.0), 4.0);
+    float fr = fract(uTime * 1.0);
+    vec2 uv = vUv;
+    if (n > 0.5 && n < 1.5) uv.x = 0.5 - abs(uv.x - 0.5);
+    if (n > 1.5 && n < 2.5) uv.y = 0.5 + abs(uv.y - 0.5);
+    if (n > 2.5) uv = vec2(0.5 - abs(uv.x - 0.5), 0.5 + abs(uv.y - 0.5));
+    vec3 c = photo(coverUv(uv, 1.08 + 0.04 * exp(-fr * 6.0), vec2(0.0)));
+    c += exp(-fr * 10.0) * 0.25;
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Comic: bold colours, black outlines and halftone dots, punch on
+     *  the beat. */
+    private const val COMIC = COMMON + """
+float L(vec2 uv, float z) { return luma(photo(coverUv(uv, z, vec2(0.0)))); }
+void main() {
+    float fr = fract(uTime * 1.0);
+    float z = 1.06 + 0.06 * exp(-fr * 6.0);
+    vec3 c = photo(coverUv(vUv, z, vec2(0.0)));
+    c = mix(vec3(luma(c)), c, 1.5);
+    c = floor(clamp(c, 0.0, 1.0) * 4.0 + 0.5) / 4.0;
+    vec2 px = 1.5 / uRes;
+    float gx = L(vUv + vec2(px.x, 0.0), z) - L(vUv - vec2(px.x, 0.0), z);
+    float gy = L(vUv + vec2(0.0, px.y), z) - L(vUv - vec2(0.0, px.y), z);
+    float edge = smoothstep(0.06, 0.16, length(vec2(gx, gy)));
+    vec2 hp = vUv * uRes / 7.0;
+    hp = vec2(hp.x + hp.y, hp.y - hp.x) * 0.7071;
+    float l = luma(c);
+    float dotm = smoothstep(0.05, 0.0, length(fract(hp) - 0.5) - (1.0 - l) * 0.45);
+    c *= 1.0 - dotm * 0.35;
+    c = mix(c, vec3(0.05), edge);
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Rainbow: waves of colour sweeping across the photo. */
+    private const val RAINBOW = COMMON + """
+void main() {
+    float e = ease(uTime / uDur);
+    vec3 c = photo(coverUv(vUv, 1.05 + 0.06 * e, vec2(0.0)));
+    float w = sin((vUv.x * 0.8 + vUv.y) * 4.0 - uTime * 2.0);
+    c = mix(c, clamp(hueShift(c, w * 1.2 + uTime * 0.6), 0.0, 1.0), 0.65);
+    c = mix(vec3(luma(c)), c, 1.25);
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Disco: dark room, coloured spotlights sweeping, mirror-ball dots,
+     *  flash on the beat. */
+    private const val DISCO = COMMON + """
+void main() {
+    vec3 p = photo(coverUv(vUv, 1.06, vec2(0.0)));
+    vec3 c = p * 0.35 * vec3(0.9, 0.8, 1.1);
+    for (int i = 0; i < 3; i++) {
+        float fi = float(i);
+        vec2 sp = vec2(0.5 + 0.38 * sin(uTime * (0.7 + 0.2 * fi) + fi * 2.1), 0.5 + 0.35 * cos(uTime * (0.6 + 0.15 * fi) + fi * 1.3));
+        vec3 col = clamp(hueShift(vec3(1.0, 0.2, 0.4), fi * 2.1 + uTime * 0.5), 0.0, 1.0);
+        float d = length(aspectD(vUv, sp));
+        float spot = smoothstep(0.22, 0.12, d);
+        c += p * col * spot * 1.6 + col * spot * 0.08;
+    }
+    vec2 q = (vUv - 0.5) * vec2(uOutAspect, 1.0);
+    float a = uTime * 0.4;
+    q = vec2(cos(a) * q.x + sin(a) * q.y, -sin(a) * q.x + cos(a) * q.y) * 26.0;
+    vec2 cell = floor(q);
+    if (hash(cell) > 0.9) c += vec3(1.0) * smoothstep(0.18, 0.0, length(fract(q) - 0.5)) * 0.35;
+    float fr = fract(uTime * 2.0);
+    c += exp(-fr * 9.0) * 0.12;
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Retro
+    /** VHS: tape colour bleed, wobbly lines, a tracking band rolling down,
+     *  noise at the bottom. */
+    private const val VHS = COMMON + """
+void main() {
+    float t = uTime;
+    vec2 uv = vUv;
+    float bandY = fract(1.0 - t * 0.15);
+    float band = smoothstep(0.035, 0.0, abs(uv.y - bandY));
+    uv.x += (hash(vec2(floor(uv.y * 240.0), floor(t * 30.0))) - 0.5) * 0.003;
+    uv.x += band * (hash(vec2(floor(t * 30.0), floor(uv.y * 90.0))) - 0.5) * 0.04;
+    float z = 1.04;
+    float r = photo(coverUv(uv + vec2(0.005, 0.0), z, vec2(0.0))).r;
+    float g = photo(coverUv(uv, z, vec2(0.0))).g;
+    float b = photo(coverUv(uv - vec2(0.005, 0.0), z, vec2(0.0))).b;
+    vec3 c = vec3(r, g, b);
+    c = mix(vec3(luma(c)), c, 0.8) * vec3(1.05, 0.98, 1.06) + 0.03;
+    c *= 0.93 + 0.07 * sin(vUv.y * uRes.y * 1.5708);
+    c += band * hash(vUv * vec2(400.0, 80.0) + t) * 0.45;
+    c = mix(c, vec3(hash(vUv * vec2(300.0, 50.0) + t * 3.0)), smoothstep(0.035, 0.0, vUv.y) * 0.8);
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Old TV: switches on like an old set, curved glass, scanlines, RGB
+     *  dots, flicker. */
+    private const val OLD_TV = COMMON + """
+void main() {
+    float on = ease(uTime / 0.6);
+    vec2 q = vUv - 0.5;
+    q.y /= max(on, 0.02);
+    vec2 cq = q * (1.0 + dot(q, q) * 0.28);
+    vec2 uv = cq + 0.5;
+    float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
+    vec3 c = photo(coverUv(uv, 1.02, vec2(0.0)));
+    c *= 0.82 + 0.18 * sin(uv.y * uRes.y * 1.2);
+    float col = mod(floor(vUv.x * uRes.x), 3.0);
+    vec3 m = vec3(0.85);
+    if (col < 0.5) m.r = 1.1; else if (col < 1.5) m.g = 1.1; else m.b = 1.1;
+    c *= m;
+    c *= 0.94 + 0.06 * hash(vec2(floor(uTime * 20.0), 1.0));
+    vec2 eg = min(uv, 1.0 - uv);
+    c *= smoothstep(0.0, 0.03, min(eg.x, eg.y));
+    vec2 d = uv - 0.5;
+    c *= 1.0 - dot(d, d) * 1.2;
+    c *= inside;
+    c += (1.0 - on) * smoothstep(0.02, 0.0, abs(vUv.y - 0.5)) * 1.5;
+    gl_FragColor = finish(c);
+}
+"""
+
+    /** Pixel: the photo breaks into big 8-bit pixels on the beat and
+     *  sharpens again. */
+    private const val PIXEL = COMMON + """
+void main() {
+    float fr = fract(uTime * 0.75);
+    float size = 1.0 + 46.0 * exp(-fr * 3.5);
+    vec2 cellPx = floor(vUv * uRes / size);
+    vec2 uv = (cellPx + 0.5) * size / uRes;
+    vec3 c = photo(coverUv(uv, 1.05, vec2(0.0)));
+    float big = smoothstep(4.0, 12.0, size);
+    c = mix(c, floor(c * 6.0 + 0.5) / 6.0, big);
+    c = mix(vec3(luma(c)), c, 1.0 + 0.3 * big);
+    gl_FragColor = finish(c);
+}
+"""
+
     val fragments: Map<String, String> = mapOf(
         "cinematic" to CINEMATIC,
         "pulse" to PULSE,
@@ -501,5 +992,35 @@ void main() {
         "neon" to NEON,
         "snow" to SNOW,
         "focus" to FOCUS,
+        "pink_sparkle" to PINK_SPARKLE,
+        "love_frame" to LOVE_FRAME,
+        "petals" to PETALS,
+        "shake" to SHAKE,
+        "split" to SPLIT,
+        "zoom_blur" to ZOOM_BLUR,
+        "letterbox" to LETTERBOX,
+        "ken_burns" to KEN_BURNS,
+        "light_leak" to LIGHT_LEAK,
+        "color_return" to COLOR_RETURN,
+        "fog" to FOG,
+        "lonely" to LONELY,
+        "fireflies" to FIREFLIES,
+        "starry" to STARRY,
+        "confetti" to CONFETTI,
+        "mirror" to MIRROR,
+        "comic" to COMIC,
+        "rainbow" to RAINBOW,
+        "disco" to DISCO,
+        "vhs" to VHS,
+        "old_tv" to OLD_TV,
+        "pixel" to PIXEL,
     )
+
+    /** The time used for the template's thumbnail card. */
+    fun thumbTime(id: String): Float = when (id) {
+        "memory" -> 3.6f
+        "color_return" -> 5.0f
+        "love_frame" -> 2.0f
+        else -> 2.6f
+    }
 }

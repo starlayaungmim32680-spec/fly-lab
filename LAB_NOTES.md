@@ -161,6 +161,22 @@ Build (arm64 only, ~20-150 s):
   video looks like the preview (Retro Film checked). Small fix for later:
   Retro Film's dust spots are hard black squares - make them round / soft.
 
+## Editor step 4 - template LIBRARY: WORKS (17 Nov 2026, FlyLab-bn263210050)
+- Ko: "many more, CapCut-like variety, but neat - each in its place".
+- 22 new shaders -> 35 templates, each in exactly ONE category:
+  Love (Dreamy, Heartbeat, Pink Sparkle, Love Frame, Petals) /
+  Beat (Pulse Zoom, Flash Beat, Glitch, Shake, Split, Zoom Blur) /
+  Cinema (Cinematic, Focus In, Golden Hour, Movie Bars, Slow Glide,
+  Light Leak) / Feel (Sad Rain, Memory, Color Return, Fog, Lonely) /
+  Night (Neon Lines, Snow, Fireflies, Starry Night) / Fun (Confetti,
+  Mirror, Comic, Rainbow, Disco) / Retro (Retro Film, VHS, Old TV, Pixel).
+  "For You" = 10 hand-picked from the others.
+- COMMON helpers: heartD, vnoise / fbm, hueShift. All 35 checked with
+  glslangValidator + rendered on a PC GPU emulator before sending.
+- Panel: CapCut-style text tabs + preview CARDS made from the user's own
+  photo: channel "thumbs" renders every template once at 180x320 into an
+  offscreen FBO on the preview thread -> JPEG bytes -> Image.memory.
+
 ## Editor step 3 - templates by feeling + the user's own look: WORKS (17 Nov 2026, FlyLab-bn263210025)
 - Ko (17 Nov 00:03): NO background removal. The editor = put many kinds of
   effects on photos to make a video, users make it their own (adjust /
@@ -214,6 +230,8 @@ Build (arm64 only, ~20-150 s):
 1. ~~Engine + 3 templates from ONE photo~~ (WORKS)
 2. ~~Cut-out templates~~ (DROPPED - no background removal)
 3. ~~Templates by feeling + filters + adjust + length~~ (WORKS 17 Nov 2026)
+3b. ~~Template library: 35 templates + photo preview cards~~ (WORKS)
+3c. Many more templates + COMBINE (stack effects on a template) - Ko 17 Nov 01:11
    Ko: "OK - now MANY more, CapCut-like variety, but neat, each in its place"
 4. Many photos -> slideshow + music
 5. Effects on existing videos

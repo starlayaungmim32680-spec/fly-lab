@@ -12,6 +12,11 @@
 // (brightness, contrast, saturation, warmth, vignette, grain) + Length
 // (5 / 8 / 10 / 15 s). Everything shows live in the preview and is baked
 // into the saved video.
+//
+// Step 4 (17 Nov 2026): the template LIBRARY - 35 templates, each in ONE
+// category (CapCut-style text tabs: For You, Love, Beat, Cinema, Feel,
+// Night, Fun, Retro). Cards show a real preview made from the user's own
+// photo ("thumbs", rendered once on the GPU after the photo loads).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -19,11 +24,10 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 class _Tpl {
-  const _Tpl(this.id, this.label, this.icon, this.mood);
+  const _Tpl(this.id, this.label, this.cat);
   final String id;
   final String label;
-  final IconData icon;
-  final String mood;
+  final String cat;
 }
 
 /// The user's look: filter + sliders (sent to the GPU as 8 numbers).
@@ -85,28 +89,66 @@ class EditorLabScreen extends StatefulWidget {
 class _EditorLabScreenState extends State<EditorLabScreen> {
   static const MethodChannel _ch = MethodChannel('flylab/editor');
 
+  // Every template lives in exactly ONE category.
   static const List<_Tpl> _templates = [
-    _Tpl('dreamy', 'Dreamy', Icons.auto_awesome, 'Love'),
-    _Tpl('heartbeat', 'Heartbeat', Icons.favorite, 'Love'),
-    _Tpl('pulse', 'Pulse Zoom', Icons.graphic_eq, 'Hype'),
-    _Tpl('flash', 'Flash Beat', Icons.flash_on, 'Hype'),
-    _Tpl('glitch', 'Glitch', Icons.blur_linear, 'Hype'),
-    _Tpl('cinematic', 'Cinematic', Icons.movie_creation_outlined, 'Cinema'),
-    _Tpl('focus', 'Focus In', Icons.center_focus_strong, 'Cinema'),
-    _Tpl('golden', 'Golden Hour', Icons.wb_sunny_outlined, 'Cinema'),
-    _Tpl('sad_rain', 'Sad Rain', Icons.water_drop_outlined, 'Feel'),
-    _Tpl('memory', 'Memory', Icons.photo_outlined, 'Feel'),
-    _Tpl('retro', 'Retro Film', Icons.camera_roll_outlined, 'Feel'),
-    _Tpl('neon', 'Neon Lines', Icons.gesture, 'Night'),
-    _Tpl('snow', 'Snow', Icons.ac_unit, 'Night'),
+    _Tpl('dreamy', 'Dreamy', 'Love'),
+    _Tpl('heartbeat', 'Heartbeat', 'Love'),
+    _Tpl('pink_sparkle', 'Pink Sparkle', 'Love'),
+    _Tpl('love_frame', 'Love Frame', 'Love'),
+    _Tpl('petals', 'Petals', 'Love'),
+    _Tpl('pulse', 'Pulse Zoom', 'Beat'),
+    _Tpl('flash', 'Flash Beat', 'Beat'),
+    _Tpl('glitch', 'Glitch', 'Beat'),
+    _Tpl('shake', 'Shake', 'Beat'),
+    _Tpl('split', 'Split', 'Beat'),
+    _Tpl('zoom_blur', 'Zoom Blur', 'Beat'),
+    _Tpl('cinematic', 'Cinematic', 'Cinema'),
+    _Tpl('focus', 'Focus In', 'Cinema'),
+    _Tpl('golden', 'Golden Hour', 'Cinema'),
+    _Tpl('letterbox', 'Movie Bars', 'Cinema'),
+    _Tpl('ken_burns', 'Slow Glide', 'Cinema'),
+    _Tpl('light_leak', 'Light Leak', 'Cinema'),
+    _Tpl('sad_rain', 'Sad Rain', 'Feel'),
+    _Tpl('memory', 'Memory', 'Feel'),
+    _Tpl('color_return', 'Color Return', 'Feel'),
+    _Tpl('fog', 'Fog', 'Feel'),
+    _Tpl('lonely', 'Lonely', 'Feel'),
+    _Tpl('neon', 'Neon Lines', 'Night'),
+    _Tpl('snow', 'Snow', 'Night'),
+    _Tpl('fireflies', 'Fireflies', 'Night'),
+    _Tpl('starry', 'Starry Night', 'Night'),
+    _Tpl('confetti', 'Confetti', 'Fun'),
+    _Tpl('mirror', 'Mirror', 'Fun'),
+    _Tpl('comic', 'Comic', 'Fun'),
+    _Tpl('rainbow', 'Rainbow', 'Fun'),
+    _Tpl('disco', 'Disco', 'Fun'),
+    _Tpl('retro', 'Retro Film', 'Retro'),
+    _Tpl('vhs', 'VHS', 'Retro'),
+    _Tpl('old_tv', 'Old TV', 'Retro'),
+    _Tpl('pixel', 'Pixel', 'Retro'),
   ];
-  static const List<(String, String)> _moods = [
-    ('All', '✨'),
-    ('Love', '💕'),
-    ('Hype', '🔥'),
-    ('Cinema', '🎬'),
-    ('Feel', '🌧️'),
-    ('Night', '🌙'),
+  static const List<String> _cats = [
+    'For You',
+    'Love',
+    'Beat',
+    'Cinema',
+    'Feel',
+    'Night',
+    'Fun',
+    'Retro',
+  ];
+  // "For You": a hand-picked mix from the other categories.
+  static const List<String> _forYou = [
+    'love_frame',
+    'dreamy',
+    'flash',
+    'golden',
+    'memory',
+    'split',
+    'neon',
+    'color_return',
+    'confetti',
+    'vhs',
   ];
   static const List<(String, Color)> _filters = [
     ('None', Color(0xFF555555)),
@@ -122,7 +164,8 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
 
   int? _textureId;
   String _template = 'dreamy';
-  String _mood = 'All';
+  String _cat = 'For You';
+  Map<String, Uint8List> _thumbs = const {};
   int _tab = 0; // 0 templates, 1 filters, 2 adjust, 3 length
   int _seconds = 8;
   bool _loading = false;
@@ -161,12 +204,29 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
       await _ch.invokeMethod('setTemplate', {'id': _template});
       await _sendParams();
       if (!mounted || r == null) return;
-      setState(() => _textureId = (r['textureId'] as num).toInt());
+      setState(() {
+        _textureId = (r['textureId'] as num).toInt();
+        _thumbs = const {};
+      });
+      unawaited(_loadThumbs());
     } catch (e) {
       _status.value = 'Could not open the photo: $e';
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Preview cards of every template, made from this photo.
+  Future<void> _loadThumbs() async {
+    try {
+      final Map<dynamic, dynamic>? r =
+          await _ch.invokeMapMethod<dynamic, dynamic>('thumbs');
+      if (!mounted || r == null) return;
+      setState(() => _thumbs = {
+            for (final MapEntry<dynamic, dynamic> e in r.entries)
+              e.key as String: e.value as Uint8List,
+          });
+    } catch (_) {}
   }
 
   Future<void> _setTemplate(String id) async {
@@ -279,68 +339,105 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
   }
 
   Widget _templatesPanel() {
-    final List<_Tpl> list = _mood == 'All'
-        ? _templates
-        : _templates.where((t) => t.mood == _mood).toList();
+    final List<_Tpl> list = _cat == 'For You'
+        ? [
+            for (final String id in _forYou)
+              _templates.firstWhere((t) => t.id == id),
+          ]
+        : _templates.where((t) => t.cat == _cat).toList();
     return Column(
       children: [
         SizedBox(
-          height: 34,
+          height: 30,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             children: [
-              for (final (String m, String emoji) in _moods)
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: ChoiceChip(
-                    label: Text('$emoji $m'),
-                    selected: _mood == m,
-                    visualDensity: VisualDensity.compact,
-                    onSelected: (_) => setState(() => _mood = m),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 86,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            children: [
-              for (final _Tpl t in list)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: GestureDetector(
-                    onTap: _exporting ? null : () => _setTemplate(t.id),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: 84,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        gradient: _template == t.id ? _brand : null,
-                        color: _template == t.id ? null : Colors.white10,
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(t.icon, size: 22),
-                          const SizedBox(height: 4),
-                          Text(t.label,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700)),
-                        ],
-                      ),
+              for (final String c in _cats)
+                GestureDetector(
+                  onTap: () => setState(() => _cat = c),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 9),
+                    child: Center(
+                      child: Text(c,
+                          style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: _cat == c
+                                  ? FontWeight.w800
+                                  : FontWeight.w500,
+                              color: _cat == c
+                                  ? Colors.white
+                                  : Colors.white54)),
                     ),
                   ),
                 ),
             ],
           ),
         ),
+        SizedBox(
+          height: 128,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+            children: [
+              for (final _Tpl t in list) _card(t),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _card(_Tpl t) {
+    final bool on = _template == t.id;
+    final Uint8List? img = _thumbs[t.id];
+    return GestureDetector(
+      onTap: _exporting ? null : () => _setTemplate(t.id),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: SizedBox(
+          width: 60,
+          child: Column(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                width: 60,
+                height: 96,
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: on ? _brand : null,
+                  color: on ? null : Colors.transparent,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: img == null
+                      ? Container(
+                          color: Colors.white10,
+                          alignment: Alignment.center,
+                          child: const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 1.5),
+                          ),
+                        )
+                      : Image.memory(img,
+                          fit: BoxFit.cover, gaplessPlayback: true),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(t.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: on ? FontWeight.w800 : FontWeight.w500,
+                      color: on ? Colors.white : Colors.white70)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
