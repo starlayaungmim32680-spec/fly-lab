@@ -62,6 +62,65 @@ Build (arm64 only, ~20-150 s):
   neon outline drawn ON the edge band (4*m*(1-m)) + smoothing the mask over
   time.
 
+## Edge polish (16 Nov 2026, testing)
+- Confidence smoothed over time (65% step, jumps > 0.5 taken at once).
+- Neon outline ON the edge band: band = 4e(1-e), e = smoothstep(0.15, 0.9,
+  conf), squared; drawn ADD in the background's glow colour after the
+  person (shader backgrounds only) - covers the white fringe / stair steps.
+
+## White fringe removal (16 Nov 2026, testing)
+- Ko: "no white at all - fix the base first". Android 13+: the person is
+  drawn by the CUTOUT AGSL shader (LabCamera companion): a = smoothstep(0.35,
+  0.95, mask alpha) (edge pulled in) and edge colour de-mixed with the clean
+  room estimate B: F = (C - (1-a) B) / max(a, 0.3), premultiplied. The room
+  estimate (buildCleanBlur) now runs for every background mode.
+
+## Motion fix - frame + its own mask (16 Nov 2026, testing)
+- Ko: "when I move, a white shadow of the room comes along". Cause: timing
+  - the newest frame was drawn with a mask from an older frame. Now each
+  shown frame is held (full copy) until ITS mask is ready and drawn with it;
+  frames arriving while the segmenter is busy are skipped. Cost: preview at
+  the mask rate (~18-22 fps) and a few tens of ms later. Time smoothing
+  only for changes < 0.12; room estimate every 3rd mask.
+
+## No colour ring + speed fix (16 Nov 2026, testing)
+- Motion fix test: "better", but camera 7 fps and Ko doesn't want the colour
+  ring around the body. Neon glow + outline OFF (`neon = false`). Pipeline:
+  segmenter works on frame N while the camera thread parks the newest
+  beautified frame (newest wins); the seg thread goes straight on with it
+  (segLoop). Room estimate after sending the frame to draw; 3 mask / edge
+  buffers.
+
+## Motion-smear fix (16 Nov 2026, testing)
+- Speed fix result: camera 20 fps, mask 23 ms (24/s), no ring. Left: white
+  shadow on fast moves = the camera's own motion blur (hair smeared over the
+  white wall). CUTOUT: colour key in the edge zone (mask < 0.98): pixels
+  within ~0.08-0.22 colour distance of the room estimate are dropped. Camera
+  asks for a fixed 30-30 fps range first (shorter shutter).
+
+## Pipeline bug fix (16 Nov 2026, testing)
+- 02:12 test: head-shaped hole showing the room = old frame drawn with a
+  newer mask (camera thread behind, 3 shared mask buffers overwritten).
+  Now: each frame carries its own mask / edge copy; only the newest
+  finished frame is drawn (handOverForDraw / drawReady, older dropped);
+  camera frames are skipped before the beauty step while one is parked.
+
+## Quality pass (16 Nov 2026, testing)
+- Pipeline fix result: no more white shadow. Ko wants: TikTok-pretty,
+  bright in a dark room, smooth on moves (read-out: camera 11 fps).
+- Draw thread (LabDraw) - camera / segmenter / drawing in parallel.
+- Low light: Fly's ISO watcher (fixed 30 -> 24-30 fps, HQ noise reduction)
+  + CUTOUT shadow lift f = 1-(1-f)^gain, gain from the person's average
+  brightness (aim 0.5, 1.0-1.8, smoothed). Read-out: "LOW", "light x1.4".
+- Beauty presets from Fly (Natural / Glow / Doll / Glam), default Glow.
+- Colour key gentler: distance 0.05-0.14, only where mask < 0.92.
+
+## Hair pass (16 Nov 2026, testing)
+- Quality pass result (02:35): "all good" - camera 19 fps, LOW works, Glow.
+  Left: hair = flat black lump, edge moving. Fix: de-colouring 55% and
+  floor c*0.5; cut lo 0.25 / hi 0.9 (softer); 3x3 space average + time
+  smoothing up to 0.25; brightness measured on the top half (face / hair).
+
 ## Plan (Ko, 15 Nov 2026)
 1. ~~Lab + GPUPixel camera~~ 2. ~~Blur~~ 3. ~~Futuristic backgrounds~~ (edge polish open) (GPU
 shaders: cyber city, warp tunnel, matrix rain, hologram grid, galaxy /

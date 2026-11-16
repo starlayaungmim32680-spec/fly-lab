@@ -13,6 +13,11 @@
 // Matrix, Grid, Aurora, Chrome - GPU shaders in LabBackgrounds.kt) with a
 // neon rim around the person, and a cleaner Blur (no grey halo). The choice
 // row scrolls sideways.
+//
+// Quality pass (16 Nov 2026): beauty presets from Fly's Record camera (tap
+// the face button, top right: Natural / Glow / Doll / Glam, default Glow);
+// the read-out also shows LOW (low-light camera mode) and the brightness
+// lift (x1.0 - x1.8).
 import 'dart:async';
 import 'dart:math';
 
@@ -52,6 +57,18 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
   double _aspect = 9 / 16;
   bool _front = true;
   String _mode = 'city';
+  // Beauty presets - the same values as Fly's gpu_camera_screen.dart.
+  static const List<(String, Map<String, double>)> _looks = [
+    ('Natural', {'smooth': 0.55, 'white': 0.25, 'thin': 0.26, 'eyes': 0.19,
+        'lips': 0.15, 'blush': 0.1}),
+    ('Glow', {'smooth': 0.75, 'white': 0.4, 'thin': 0.38, 'eyes': 0.3,
+        'lips': 0.25, 'blush': 0.25}),
+    ('Doll', {'smooth': 0.9, 'white': 0.5, 'thin': 0.56, 'eyes': 0.49,
+        'lips': 0.35, 'blush': 0.35}),
+    ('Glam', {'smooth': 1.0, 'white': 0.6, 'thin': 1.0, 'eyes': 0.85,
+        'lips': 0.45, 'blush': 0.4}),
+  ];
+  int _look = 1;
   String? _error;
   // The read-out redraws alone (ValueNotifier), not the whole camera.
   final ValueNotifier<String> _stats = ValueNotifier<String>('');
@@ -88,6 +105,7 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
           .invokeMapMethod<dynamic, dynamic>('start', {'front': _front});
       if (r == null || !mounted) return;
       await _ch.invokeMethod('setBackground', {'mode': _mode});
+      await _ch.invokeMethod('set', _looks[_look].$2);
       setState(() {
         _textureId = (r['textureId'] as num).toInt();
         _aspect = (r['width'] as num) / (r['height'] as num);
@@ -108,9 +126,12 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
       final double segMs = (r['segMs'] as num?)?.toDouble() ?? 0;
       final double segFps = (r['segFps'] as num?)?.toDouble() ?? 0;
       final String crash = (r['lastCrash'] as String?) ?? '';
+      final bool low = r['low'] == true;
+      final double gain = (r['gain'] as num?)?.toDouble() ?? 1;
       _stats.value = 'camera ${fps.toStringAsFixed(0)} fps · '
           'mask ${segMs.toStringAsFixed(0)} ms '
           '(${segFps.toStringAsFixed(0)}/s) · ${r['delegate']}'
+          '${low ? ' · LOW' : ''} · light x${gain.toStringAsFixed(1)}'
           '${crash.isEmpty ? '' : '\nlast crash: $crash'}';
     } catch (_) {}
   }
@@ -119,6 +140,13 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
     setState(() => _mode = m);
     try {
       await _ch.invokeMethod('setBackground', {'mode': m});
+    } catch (_) {}
+  }
+
+  Future<void> _nextLook() async {
+    setState(() => _look = (_look + 1) % _looks.length);
+    try {
+      await _ch.invokeMethod('set', _looks[_look].$2);
     } catch (_) {}
   }
 
@@ -201,9 +229,27 @@ class _LabCameraScreenState extends State<LabCameraScreen> {
                     ),
                   ),
                 ),
-                IconButton(
-                  onPressed: _flip,
-                  icon: const Icon(Icons.flip_camera_ios_outlined),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      onPressed: _flip,
+                      icon: const Icon(Icons.flip_camera_ios_outlined),
+                    ),
+                    GestureDetector(
+                      onTap: _nextLook,
+                      child: Column(
+                        children: [
+                          const Icon(Icons.face_retouching_natural),
+                          Text(_looks[_look].$1,
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  shadows: [Shadow(blurRadius: 4)])),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
