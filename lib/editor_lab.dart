@@ -17,6 +17,13 @@
 // category (CapCut-style text tabs: For You, Love, Beat, Cinema, Feel,
 // Night, Fun, Retro). Cards show a real preview made from the user's own
 // photo ("thumbs", rendered once on the GPU after the photo loads).
+//
+// Step 5 (17 Nov 2026): COMBINE + more. 7 new templates (Spin, Dolly Zoom,
+// Aurora, Kaleido, Pop Art, Sketch, Duotone; new category Art) and an
+// EFFECTS tab: 12 effects (Sparkle, Hearts, Snow, Rain, Bokeh, Dust, Light
+// Rays, Lens Flare, Bubbles, Film Strip, Fireworks, Balloons) - tick up to
+// 3, they stack on top of the template in the order they were picked
+// ("setTemplate" {ids: [template, effect...]}).
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -119,14 +126,37 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     _Tpl('starry', 'Starry Night', 'Night'),
     _Tpl('confetti', 'Confetti', 'Fun'),
     _Tpl('mirror', 'Mirror', 'Fun'),
-    _Tpl('comic', 'Comic', 'Fun'),
+    _Tpl('kaleido', 'Kaleido', 'Fun'),
     _Tpl('rainbow', 'Rainbow', 'Fun'),
     _Tpl('disco', 'Disco', 'Fun'),
     _Tpl('retro', 'Retro Film', 'Retro'),
     _Tpl('vhs', 'VHS', 'Retro'),
     _Tpl('old_tv', 'Old TV', 'Retro'),
     _Tpl('pixel', 'Pixel', 'Retro'),
+    _Tpl('spin', 'Spin', 'Beat'),
+    _Tpl('vertigo', 'Dolly Zoom', 'Cinema'),
+    _Tpl('aurora', 'Aurora', 'Night'),
+    _Tpl('comic', 'Comic', 'Art'),
+    _Tpl('pop_art', 'Pop Art', 'Art'),
+    _Tpl('sketch', 'Sketch', 'Art'),
+    _Tpl('duotone', 'Duotone', 'Art'),
   ];
+  // Effects: made to stack on top of any template (max 3).
+  static const List<_Tpl> _effects = [
+    _Tpl('fx_sparkle', 'Sparkle', 'Effect'),
+    _Tpl('fx_hearts', 'Hearts', 'Effect'),
+    _Tpl('fx_snow', 'Snow', 'Effect'),
+    _Tpl('fx_rain', 'Rain', 'Effect'),
+    _Tpl('fx_bokeh', 'Bokeh', 'Effect'),
+    _Tpl('fx_dust', 'Film Dust', 'Effect'),
+    _Tpl('fx_rays', 'Light Rays', 'Effect'),
+    _Tpl('fx_flare', 'Lens Flare', 'Effect'),
+    _Tpl('fx_bubbles', 'Bubbles', 'Effect'),
+    _Tpl('fx_film', 'Film Strip', 'Effect'),
+    _Tpl('fx_fireworks', 'Fireworks', 'Effect'),
+    _Tpl('fx_balloons', 'Balloons', 'Effect'),
+  ];
+  static const int _maxFx = 3;
   static const List<String> _cats = [
     'For You',
     'Love',
@@ -135,18 +165,19 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     'Feel',
     'Night',
     'Fun',
+    'Art',
     'Retro',
   ];
   // "For You": a hand-picked mix from the other categories.
   static const List<String> _forYou = [
     'love_frame',
     'dreamy',
-    'flash',
+    'pop_art',
     'golden',
     'memory',
     'split',
     'neon',
-    'color_return',
+    'sketch',
     'confetti',
     'vhs',
   ];
@@ -166,7 +197,8 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
   String _template = 'dreamy';
   String _cat = 'For You';
   Map<String, Uint8List> _thumbs = const {};
-  int _tab = 0; // 0 templates, 1 filters, 2 adjust, 3 length
+  int _tab = 0; // 0 templates, 1 effects, 2 filters, 3 adjust, 4 length
+  List<String> _fx = const [];
   int _seconds = 8;
   bool _loading = false;
   bool _exporting = false;
@@ -201,7 +233,7 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     try {
       final Map<dynamic, dynamic>? r = await _ch
           .invokeMapMethod<dynamic, dynamic>('load', {'path': f.path});
-      await _ch.invokeMethod('setTemplate', {'id': _template});
+      await _sendChain();
       await _sendParams();
       if (!mounted || r == null) return;
       setState(() {
@@ -229,12 +261,36 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     } catch (_) {}
   }
 
-  Future<void> _setTemplate(String id) async {
-    setState(() => _template = id);
+  /// The template + the picked effects, in order.
+  Future<void> _sendChain() async {
     try {
-      await _ch.invokeMethod('setTemplate', {'id': id});
+      await _ch.invokeMethod('setTemplate', {
+        'ids': [_template, ..._fx],
+      });
     } catch (_) {}
   }
+
+  Future<void> _setTemplate(String id) async {
+    setState(() => _template = id);
+    await _sendChain();
+  }
+
+  Future<void> _toggleFx(String id) async {
+    if (_fx.contains(id)) {
+      setState(() => _fx = [..._fx]..remove(id));
+    } else if (_fx.length >= _maxFx) {
+      _status.value = 'Up to $_maxFx effects - remove one first';
+      return;
+    } else {
+      setState(() => _fx = [..._fx, id]);
+    }
+    _status.value = '';
+    await _sendChain();
+  }
+
+  String _labelOf(String id) => [..._templates, ..._effects]
+      .firstWhere((t) => t.id == id, orElse: () => _Tpl(id, id, ''))
+      .label;
 
   void _setLength(int s) {
     setState(() => _seconds = s);
@@ -255,7 +311,10 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     try {
       await _sendParams();
       final Map<dynamic, dynamic>? r = await _ch.invokeMapMethod<dynamic,
-          dynamic>('export', {'id': _template, 'seconds': _seconds.toDouble()});
+          dynamic>('export', {
+        'ids': [_template, ..._fx],
+        'seconds': _seconds.toDouble(),
+      });
       if (r != null) {
         final double secs = ((r['ms'] as num?) ?? 0) / 1000;
         final double mb = ((r['bytes'] as num?) ?? 0) / (1024 * 1024);
@@ -293,6 +352,7 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
   Widget _tabBar() {
     const List<(String, IconData)> tabs = [
       ('Templates', Icons.auto_awesome_motion),
+      ('Effects', Icons.layers_outlined),
       ('Filters', Icons.filter_vintage_outlined),
       ('Adjust', Icons.tune),
       ('Length', Icons.timer_outlined),
@@ -388,11 +448,58 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     );
   }
 
-  Widget _card(_Tpl t) {
-    final bool on = _template == t.id;
+  Widget _effectsPanel() {
+    return SizedBox(
+      height: 158,
+      child: Column(
+        children: [
+          SizedBox(
+            height: 30,
+            child: Row(
+              children: [
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    'Tap to add on top of the template (up to $_maxFx)',
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ),
+                if (_fx.isNotEmpty)
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _fx = const []);
+                      _sendChain();
+                    },
+                    child: const Text('Clear'),
+                  ),
+                const SizedBox(width: 6),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 128,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+              children: [
+                for (final _Tpl t in _effects)
+                  _card(t,
+                      selected: _fx.contains(t.id),
+                      badge: _fx.contains(t.id) ? _fx.indexOf(t.id) + 1 : 0,
+                      onTap: () => _toggleFx(t.id)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card(_Tpl t, {bool? selected, int badge = 0, VoidCallback? onTap}) {
+    final bool sel = selected ?? _template == t.id;
     final Uint8List? img = _thumbs[t.id];
     return GestureDetector(
-      onTap: _exporting ? null : () => _setTemplate(t.id),
+      onTap: _exporting ? null : (onTap ?? () => _setTemplate(t.id)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: SizedBox(
@@ -406,10 +513,13 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
                 padding: const EdgeInsets.all(2),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(10),
-                  gradient: on ? _brand : null,
-                  color: on ? null : Colors.transparent,
+                  gradient: sel ? _brand : null,
+                  color: sel ? null : Colors.transparent,
                 ),
-                child: ClipRRect(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: img == null
                       ? Container(
@@ -425,6 +535,23 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
                       : Image.memory(img,
                           fit: BoxFit.cover, gaplessPlayback: true),
                 ),
+                if (badge > 0)
+                  Positioned(
+                    right: 4,
+                    top: 4,
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      alignment: Alignment.center,
+                      decoration: const BoxDecoration(
+                          shape: BoxShape.circle, gradient: _brand),
+                      child: Text('$badge',
+                          style: const TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                  ],
+                ),
               ),
               const SizedBox(height: 4),
               Text(t.label,
@@ -432,8 +559,8 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       fontSize: 10.5,
-                      fontWeight: on ? FontWeight.w800 : FontWeight.w500,
-                      color: on ? Colors.white : Colors.white70)),
+                      fontWeight: sel ? FontWeight.w800 : FontWeight.w500,
+                      color: sel ? Colors.white : Colors.white70)),
             ],
           ),
         ),
@@ -622,13 +749,25 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
                 builder: (context, p, _) => LinearProgressIndicator(value: p),
               ),
             ),
+          if (_fx.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+              child: Text(
+                [_template, ..._fx].map(_labelOf).join('  +  '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
           _tabBar(),
           AnimatedSize(
             duration: const Duration(milliseconds: 180),
             child: switch (_tab) {
               0 => _templatesPanel(),
-              1 => _filtersPanel(),
-              2 => _adjustPanel(),
+              1 => _effectsPanel(),
+              2 => _filtersPanel(),
+              3 => _adjustPanel(),
               _ => _lengthPanel(),
             },
           ),

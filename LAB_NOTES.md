@@ -161,6 +161,28 @@ Build (arm64 only, ~20-150 s):
   video looks like the preview (Retro Film checked). Small fix for later:
   Retro Film's dust spots are hard black squares - make them round / soft.
 
+## Editor step 5 - COMBINE + more: WORKS (17 Nov 2026, FlyLab-bn263210118)
+- Ko's test video: template + Snow + Bokeh + Fireworks, 8 s, 240 frames,
+  4.1 MB, all layers baked in, right way up. Note: several BRIGHT layers
+  together look a little over-bright - for later: auto-balance brightness
+  when stacking (for now Adjust -> Brightness).
+- Ko: "many more" + "combine one with another".
+- Engine: a CHAIN - setTemplate {ids: [template, effect, effect, effect]}.
+  PhotoRenderer.draw() renders pass 1 (template on the photo) into an
+  offscreen texture, each next pass reads the one before (ping-pong FBOs,
+  uFlipIn = 1 because FBO rows are bottom-up), the last pass draws to the
+  screen / encoder with uFinal = 1 (only it applies the user's look +
+  fade). Export takes the same ids.
+- 7 new templates (Spin - Beat, Dolly Zoom - Cinema, Aurora - Night,
+  Kaleido - Fun, Pop Art / Sketch / Duotone - new category Art; Comic moved
+  to Art) -> 42 templates.
+- EFFECTS tab: 12 stackable effects with no zoom / no grade of their own -
+  Sparkle, Hearts, Snow, Rain, Bokeh, Film Dust, Light Rays, Lens Flare,
+  Bubbles, Film Strip, Fireworks, Balloons. Tick up to 3 (numbered badges =
+  order), "Clear"; the chain is shown as "Dreamy + Snow + Sparkle".
+- All 54 shaders checked with glslangValidator; chains rendered on the PC
+  emulator (Dreamy + Hearts, Neon + Snow + Sparkle, Memory + Bokeh ...).
+
 ## Editor step 4 - template LIBRARY: WORKS (17 Nov 2026, FlyLab-bn263210050)
 - Ko: "many more, CapCut-like variety, but neat - each in its place".
 - 22 new shaders -> 35 templates, each in exactly ONE category:
@@ -231,7 +253,7 @@ Build (arm64 only, ~20-150 s):
 2. ~~Cut-out templates~~ (DROPPED - no background removal)
 3. ~~Templates by feeling + filters + adjust + length~~ (WORKS 17 Nov 2026)
 3b. ~~Template library: 35 templates + photo preview cards~~ (WORKS)
-3c. Many more templates + COMBINE (stack effects on a template) - Ko 17 Nov 01:11
+3c. ~~Many more templates + COMBINE (template + up to 3 effects)~~ (WORKS 17 Nov 2026)
    Ko: "OK - now MANY more, CapCut-like variety, but neat, each in its place"
 4. Many photos -> slideshow + music
 5. Effects on existing videos

@@ -23,14 +23,16 @@ package com.aungdev.fly_lab
 //
 // Channel "flylab/editor":
 //   load {path}                     -> {textureId, width, height}
-//   setTemplate {id}                -> null
+//   setTemplate {ids: [template, effect, effect...]} (or {id}) -> null
+//       step 5: a CHAIN - the template first, then up to 3 effects stacked
+//       on it (each pass reads the previous pass from an offscreen texture)
 //   thumbs                          -> {id: jpeg bytes} (step 4: a 180x320
 //                                      preview card of EVERY template made
 //                                      from the user's photo)
 //   setParams {adj: [8 doubles], seconds} -> null
 //       adj = brightness, contrast, saturation, warmth,
 //             vignette, grain, filter id, filter strength
-//   export {id, seconds}            -> {uri, ms, bytes, frames}
+//   export {ids (or id), seconds}   -> {uri, ms, bytes, frames}
 //   progress                        -> 0..1 (while exporting)
 //   dispose                         -> null
 
@@ -184,21 +186,79 @@ class PhotoRenderer {
         return s
     }
 
-    fun draw(idWanted: String, t: Float, dur: Float, w: Int, h: Int, adj: FloatArray) {
-        val id = if (PhotoTemplates.fragments.containsKey(idWanted)) idWanted else "cinematic"
+    // Offscreen ping-pong textures for chains (template -> effect -> ...).
+    private val passFb = IntArray(2)
+    private val passTex = IntArray(2)
+    private var passW = 0
+    private var passH = 0
+
+    private fun ensurePass(w: Int, h: Int) {
+        if (passFb[0] != 0 && passW == w && passH == h) return
+        if (passFb[0] != 0) {
+            GLES20.glDeleteFramebuffers(2, passFb, 0)
+            GLES20.glDeleteTextures(2, passTex, 0)
+        }
+        GLES20.glGenFramebuffers(2, passFb, 0)
+        GLES20.glGenTextures(2, passTex, 0)
+        for (k in 0..1) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, passTex[k])
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, passFb[k])
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, passTex[k], 0)
+        }
+        passW = w
+        passH = h
+    }
+
+    /**
+     * Draws a CHAIN into the framebuffer that is bound now: the template
+     * on the photo, then each effect on the result of the pass before.
+     * Only the last pass applies the user's look and the fade (uFinal).
+     */
+    fun draw(chain: List<String>, t: Float, dur: Float, w: Int, h: Int, adj: FloatArray) {
+        val ids = chain.filter { PhotoTemplates.fragments.containsKey(it) }
+            .ifEmpty { listOf("cinematic") }
+        if (ids.size == 1) {
+            pass(ids[0], tex, imgAspect, 0f, 1f, t, dur, w, h, adj)
+            return
+        }
+        val target = IntArray(1)
+        GLES20.glGetIntegerv(GLES20.GL_FRAMEBUFFER_BINDING, target, 0)
+        ensurePass(w, h)
+        for ((i, id) in ids.withIndex()) {
+            val last = i == ids.size - 1
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, if (last) target[0] else passFb[i % 2])
+            val src = if (i == 0) tex else passTex[(i - 1) % 2]
+            val aspect = if (i == 0) imgAspect else w.toFloat() / h
+            pass(id, src, aspect, if (i == 0) 0f else 1f, if (last) 1f else 0f, t, dur, w, h, adj)
+        }
+    }
+
+    private fun pass(
+        id: String, src: Int, aspect: Float, flipIn: Float, finalPass: Float,
+        t: Float, dur: Float, w: Int, h: Int, adj: FloatArray,
+    ) {
         val p = program(id)
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUseProgram(p)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, src)
         GLES20.glUniform1i(GLES20.glGetUniformLocation(p, "uTex"), 0)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uTime"), t)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uDur"), dur)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uImgAspect"), imgAspect)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uImgAspect"), aspect)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uOutAspect"), w.toFloat() / h)
         GLES20.glUniform2f(GLES20.glGetUniformLocation(p, "uRes"), w.toFloat(), h.toFloat())
         GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uAdj"), adj[0], adj[1], adj[2], adj[3])
         GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uAdj2"), adj[4], adj[5], adj[6], adj[7])
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFinal"), finalPass)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFlipIn"), flipIn)
         GLES20.glEnableVertexAttribArray(0)
         GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, quad)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -218,7 +278,7 @@ class PhotoVideoEngine(
     @Volatile private var previewDur = 8f
 
     private var photo: Bitmap? = null
-    @Volatile private var template = "cinematic"
+    @Volatile private var chain: List<String> = listOf("cinematic")
     // brightness, contrast, saturation, warmth, vignette, grain, filter, strength
     @Volatile private var adj = floatArrayOf(0f, 1f, 1f, 0f, 0f, 0f, 0f, 1f)
 
@@ -240,11 +300,18 @@ class PhotoVideoEngine(
         when (call.method) {
             "load" -> load(call.argument<String>("path") ?: "", result)
             "setTemplate" -> {
-                template = call.argument<String>("id") ?: template
-                pStart = SystemClock.uptimeMillis()
+                val ids = call.argument<List<String>>("ids")
+                    ?: call.argument<String>("id")?.let { listOf(it) }
+                if (ids != null && ids.isNotEmpty()) {
+                    // Restart the loop only when the template itself changes.
+                    if (ids[0] != chain.firstOrNull()) pStart = SystemClock.uptimeMillis()
+                    chain = ids.take(4)
+                }
                 result.success(null)
             }
-            "export" -> export(call.argument<String>("id") ?: template,
+            "export" -> export(
+                call.argument<List<String>>("ids")
+                    ?: call.argument<String>("id")?.let { listOf(it) } ?: chain,
                 call.argument<Double>("seconds") ?: 8.0, result)
             "setParams" -> {
                 val a = call.argument<List<Double>>("adj")
@@ -371,7 +438,7 @@ class PhotoVideoEngine(
                 val neutral = floatArrayOf(0f, 1f, 1f, 0f, 0f, 0f, 0f, 1f)
                 val out = HashMap<String, ByteArray>()
                 for (id in PhotoTemplates.fragments.keys) {
-                    r.draw(id, PhotoTemplates.thumbTime(id), 8f, tw, th, neutral)
+                    r.draw(listOf(id), PhotoTemplates.thumbTime(id), 8f, tw, th, neutral)
                     buf.rewind()
                     GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
                     for (y in 0 until th) {
@@ -409,7 +476,7 @@ class PhotoVideoEngine(
             val t0 = SystemClock.uptimeMillis()
             try {
                 val t = ((t0 - pStart) / 1000f) % previewDur
-                pRenderer?.draw(template, t, previewDur, outW, outH, adj)
+                pRenderer?.draw(chain, t, previewDur, outW, outH, adj)
                 pEgl?.swap()
             } catch (e: Throwable) {
                 Log.e(tag, "frame", e)
@@ -440,7 +507,7 @@ class PhotoVideoEngine(
     }
 
     // ------------------------------------------------------------ export
-    private fun export(id: String, seconds: Double, result: MethodChannel.Result) {
+    private fun export(ids: List<String>, seconds: Double, result: MethodChannel.Result) {
         val bm = photo ?: return result.error("no_photo", "No photo", null)
         if (exporting) return result.error("busy", "Already exporting", null)
         exporting = true
@@ -452,7 +519,7 @@ class PhotoVideoEngine(
             val out = File(activity.cacheDir, "flylab_${System.currentTimeMillis()}.mp4")
             var frames = 0
             try {
-                frames = encode(copy, a, id, seconds.toFloat(), out)
+                frames = encode(copy, a, ids, seconds.toFloat(), out)
                 val uri = saveToGallery(out)
                 val ms = SystemClock.uptimeMillis() - started
                 val bytes = out.length()
@@ -473,7 +540,7 @@ class PhotoVideoEngine(
     }
 
     /** Renders every frame of the template into H.264 and muxes an mp4. */
-    private fun encode(bm: Bitmap, a: FloatArray, id: String, dur: Float, out: File): Int {
+    private fun encode(bm: Bitmap, a: FloatArray, ids: List<String>, dur: Float, out: File): Int {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outW, outH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -524,7 +591,7 @@ class PhotoVideoEngine(
             r.setPhoto(bm)
             for (i in 0 until total) {
                 val t = i.toFloat() / fps
-                r.draw(id, t, dur, outW, outH, a)
+                r.draw(ids, t, dur, outW, outH, a)
                 egl.swap(i * 1_000_000_000L / fps)
                 drain(false)
                 progress = (i + 1).toDouble() / total
