@@ -15,9 +15,18 @@ package com.aungdev.fly_lab
 //            music is step 4), then it is copied into the phone's gallery
 //            (Movies/FlyLab) so Ko can watch / share it.
 //
+// Step 2 (cut-out templates) was DROPPED on 17 Nov 2026 (Ko: no background
+// removal) - PhotoMatting.kt and the multiclass model are gone.
+// Step 3 (17 Nov 2026): 13 templates by feeling + the user's own look:
+// "setParams" sends the filter / sliders (uAdj, uAdj2) and the video
+// length; the preview loops over that length and export uses the same.
+//
 // Channel "flylab/editor":
 //   load {path}                     -> {textureId, width, height}
 //   setTemplate {id}                -> null
+//   setParams {adj: [8 doubles], seconds} -> null
+//       adj = brightness, contrast, saturation, warmth,
+//             vignette, grain, filter id, filter strength
 //   export {id, seconds}            -> {uri, ms, bytes, frames}
 //   progress                        -> 0..1 (while exporting)
 //   dispose                         -> null
@@ -126,18 +135,24 @@ class PhotoRenderer {
         }
 
     fun setPhoto(bm: Bitmap) {
-        if (tex == 0) {
-            val t = IntArray(1)
-            GLES20.glGenTextures(1, t, 0)
-            tex = t[0]
-        }
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
+        if (tex == 0) tex = newTex()
+        upload(tex, bm)
+        imgAspect = bm.width.toFloat() / bm.height
+    }
+
+    private fun newTex(): Int {
+        val t = IntArray(1)
+        GLES20.glGenTextures(1, t, 0)
+        return t[0]
+    }
+
+    private fun upload(id: Int, bm: Bitmap) {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bm, 0)
-        imgAspect = bm.width.toFloat() / bm.height
     }
 
     private fun program(id: String): Int {
@@ -165,7 +180,8 @@ class PhotoRenderer {
         return s
     }
 
-    fun draw(id: String, t: Float, dur: Float, w: Int, h: Int) {
+    fun draw(idWanted: String, t: Float, dur: Float, w: Int, h: Int, adj: FloatArray) {
+        val id = if (PhotoTemplates.fragments.containsKey(idWanted)) idWanted else "cinematic"
         val p = program(id)
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUseProgram(p)
@@ -176,6 +192,9 @@ class PhotoRenderer {
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uDur"), dur)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uImgAspect"), imgAspect)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uOutAspect"), w.toFloat() / h)
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(p, "uRes"), w.toFloat(), h.toFloat())
+        GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uAdj"), adj[0], adj[1], adj[2], adj[3])
+        GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uAdj2"), adj[4], adj[5], adj[6], adj[7])
         GLES20.glEnableVertexAttribArray(0)
         GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, quad)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -192,10 +211,12 @@ class PhotoVideoEngine(
     private val outW = 720
     private val outH = 1280
     private val fps = 30
-    private val previewDur = 8f
+    @Volatile private var previewDur = 8f
 
     private var photo: Bitmap? = null
     @Volatile private var template = "cinematic"
+    // brightness, contrast, saturation, warmth, vignette, grain, filter, strength
+    @Volatile private var adj = floatArrayOf(0f, 1f, 1f, 0f, 0f, 0f, 0f, 1f)
 
     // Preview.
     private var pThread: HandlerThread? = null
@@ -221,6 +242,16 @@ class PhotoVideoEngine(
             }
             "export" -> export(call.argument<String>("id") ?: template,
                 call.argument<Double>("seconds") ?: 8.0, result)
+            "setParams" -> {
+                val a = call.argument<List<Double>>("adj")
+                if (a != null && a.size >= 8) adj = FloatArray(8) { a[it].toFloat() }
+                val secs = call.argument<Double>("seconds")
+                if (secs != null && secs.toFloat() != previewDur) {
+                    previewDur = secs.toFloat().coerceIn(3f, 30f)
+                    pStart = SystemClock.uptimeMillis()
+                }
+                result.success(null)
+            }
             "progress" -> result.success(progress)
             "dispose" -> {
                 stopPreview()
@@ -316,7 +347,7 @@ class PhotoVideoEngine(
             val t0 = SystemClock.uptimeMillis()
             try {
                 val t = ((t0 - pStart) / 1000f) % previewDur
-                pRenderer?.draw(template, t, previewDur, outW, outH)
+                pRenderer?.draw(template, t, previewDur, outW, outH, adj)
                 pEgl?.swap()
             } catch (e: Throwable) {
                 Log.e(tag, "frame", e)
@@ -353,12 +384,13 @@ class PhotoVideoEngine(
         exporting = true
         progress = 0.0
         val copy = bm.copy(Bitmap.Config.ARGB_8888, false)
+        val a = adj.copyOf()
         Thread {
             val started = SystemClock.uptimeMillis()
             val out = File(activity.cacheDir, "flylab_${System.currentTimeMillis()}.mp4")
             var frames = 0
             try {
-                frames = encode(copy, id, seconds.toFloat(), out)
+                frames = encode(copy, a, id, seconds.toFloat(), out)
                 val uri = saveToGallery(out)
                 val ms = SystemClock.uptimeMillis() - started
                 val bytes = out.length()
@@ -379,7 +411,7 @@ class PhotoVideoEngine(
     }
 
     /** Renders every frame of the template into H.264 and muxes an mp4. */
-    private fun encode(bm: Bitmap, id: String, dur: Float, out: File): Int {
+    private fun encode(bm: Bitmap, a: FloatArray, id: String, dur: Float, out: File): Int {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outW, outH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -430,7 +462,7 @@ class PhotoVideoEngine(
             r.setPhoto(bm)
             for (i in 0 until total) {
                 val t = i.toFloat() / fps
-                r.draw(id, t, dur, outW, outH)
+                r.draw(id, t, dur, outW, outH, a)
                 egl.swap(i * 1_000_000_000L / fps)
                 drain(false)
                 progress = (i + 1).toDouble() / total

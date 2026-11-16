@@ -143,7 +143,7 @@ Build (arm64 only, ~20-150 s):
   turns the user's text (Burmese OK) into a recipe of OUR effects; no
   generative video (too expensive).
 
-## Editor step 1 - one photo -> video (16 Nov 2026 evening, testing)
+## Editor step 1 - one photo -> video: WORKS (16 Nov 2026, FlyLab-bn263202254)
 - `PhotoTemplates.kt`: 3 GLSL ES 1.0 templates (cinematic: slow push-in +
   teal/orange + light leak; pulse: 120 bpm zoom punch + RGB split + shake;
   retro: sepia, grain, flicker, weave, scratches, dust). Shared helpers:
@@ -156,12 +156,64 @@ Build (arm64 only, ~20-150 s):
   (Movies/FlyLab via MediaStore). No audio yet (step 4).
 - `lib/editor_lab.dart` + Lab home (`LabHome` in main.dart): Photo -> Video
   / Camera Lab. `image_picker` ^1.2.2 added.
+- Ko's phone: preview smooth, export **8 s = 240 frames in 3.0 s** (much
+  faster than real time), 9.5 MB, saved to Movies/FlyLab, the gallery
+  video looks like the preview (Retro Film checked). Small fix for later:
+  Retro Film's dust spots are hard black squares - make them round / soft.
 
-## Editor plan (Ko approved, 16 Nov 2026)
-1. Engine + 3 templates from ONE photo (Cinematic Zoom, Pulse Zoom, Retro
-   Film): pick photo -> preview -> export mp4 (prove speed on the V2250)
-2. Cut-out templates (3D Pop, Future, ...)
-3. Template panel (tabs + animated preview cards, CapCut-style layout)
+## Editor step 3 - templates by feeling + the user's own look (17 Nov 2026, testing)
+- Ko (17 Nov 00:03): NO background removal. The editor = put many kinds of
+  effects on photos to make a video, users make it their own (adjust /
+  filters), designed for how people FEEL; later the same for videos.
+- Step 2 cut-out work DROPPED: PhotoMatting.kt deleted, the multiclass
+  model removed from assets (APK back to ~40 MB). selfie_segmenter.tflite
+  stays (Camera Lab uses it).
+- 13 templates, grouped by mood: Love (Dreamy, Heartbeat), Hype (Pulse
+  Zoom, Flash Beat, Glitch), Cinema (Cinematic, Focus In, Golden Hour),
+  Feel (Sad Rain, Memory polaroid, Retro Film), Night (Neon Lines, Snow).
+  All 13 shaders checked with glslangValidator and rendered on a PC GPU
+  emulator before sending.
+- finish(c) in every template = the user's look: Filters (None, Vivid,
+  Warm, Cool, B&W, Fade, Pink, Moody + strength), Adjust (brightness,
+  contrast, saturation, warmth, vignette, grain), fade in / out. Length
+  5 / 8 / 10 / 15 s. Channel: setParams {adj[8], seconds}.
+- UI: tabs Templates / Filters / Adjust / Length; mood chips; sliders use
+  ValueNotifier (no full-screen rebuilds).
+
+## Editor step 2 - cut-out templates (16 Nov 2026) - DROPPED 17 Nov 2026
+- `PhotoMatting.kt`: person cut ONCE per photo - MediaPipe IMAGE mode (CPU)
+  on <= 512 px -> guided filter (r = w/110, eps 1e-3) at <= 1024 px using
+  the photo's brightness as guide (edges snap to hair / shoulders) ->
+  matte; clean-plate background (person weighted out, filled from the
+  surroundings at 1/8 size, blended in near the person).
+- Textures uMask (unit 1) / uBg (unit 2) + uRes. Templates: 3D Pop
+  (background pulls back + drifts, person pushes in + drifts the other way
+  = parallax), Future City / Warp / Matrix (GLSL ports of the AGSL
+  backgrounds, person with a light tint). Retro dust = round soft spots.
+- Preview starts at once; cut-out templates show the photo until the cut
+  is ready ("Person cut out in x s"); export of a cut-out template waits
+  for it.
+
+## Editor step 2c - held things (16 Nov 2026) - DROPPED
+- 2b test (bn263202337): multiclass model, cut 0.7 s - background junk gone,
+  but the phone in the hands and the shin between the knees were cut away.
+- Fix: morphological close (r = 1.5 % of width) + fill enclosed holes
+  smaller than 12 % of the person, before the guided filter.
+
+## Editor step 2b - cleaner cut-out (16 Nov 2026) - DROPPED
+- Ko's test (bn263202315): cut in 0.2 s, but selfie_segmenter grabbed the
+  blue sheet / bed / wall around a sitting person (blocky pieces), and
+  3D Pop showed a dark smoky shadow behind the person.
+- Fixes: selfie_multiclass_256x256.tflite in assets (whole body + hair,
+  person = 1 - background; old model is the fallback), small junk blobs
+  dropped, firmer threshold (q - 0.28) / 0.44, clean plate by push-pull
+  fill, 3D Pop background slightly out of focus + gentler parallax.
+  Status shows which model was used ("multiclass" / "selfie").
+
+## Editor plan (Ko approved 16 Nov 2026, revised 17 Nov 2026)
+1. ~~Engine + 3 templates from ONE photo~~ (WORKS)
+2. ~~Cut-out templates~~ (DROPPED - no background removal)
+3. Templates by feeling + filters + adjust + length (testing)
 4. Many photos -> slideshow + music
 5. Effects on existing videos
 6. Lite editor (trim / split / join / speed / text / music by hand)
