@@ -121,7 +121,54 @@ Build (arm64 only, ~20-150 s):
   floor c*0.5; cut lo 0.25 / hi 0.9 (softer); 3x3 space average + time
   smoothing up to 0.25; brightness measured on the top half (face / hair).
 
-## Plan (Ko, 15 Nov 2026)
+## STATUS 16 Nov 2026 03:00 - live camera effects PAUSED, new direction
+- Live camera state: edge / motion / speed / quality passes work on Ko's
+  phone (no white shadow, ~19 fps, LOW mode, Glow beauty). The last "hair
+  pass" build (fly-lab-hair.zip) was NOT tested yet. Honest limit: the free
+  256x256 selfie model can't do hair strands / TikTok quality live on the
+  V2250 (CPU only, GPU delegate crashes). Options discussed: Snap Camera
+  Kit (free SDK, needs Snap approval), own path A (guided-filter refine of
+  the mask) / B (MODNet / PP-MattingV2, Apache-2.0, heavier).
+- **Ko's new direction (16 Nov 2026 ~03:00): a PHOTO / VIDEO EDITOR** -
+  pick existing photos / videos -> templates with many effects -> an mp4
+  -> post straight to Fly. Main wish: ONE PHOTO -> a VIDEO. Users can also
+  edit by hand, and "just write text" -> effects. Not live, so quality can
+  be much higher (frames can take their time; person cut-out offline).
+- Fly's own versions (no copying CapCut designs / assets), e.g. Cinematic
+  Zoom, 3D Pop (person / background cut apart = parallax), Pulse Zoom,
+  Retro Film, Butterflies, Paint Pop, Future (the 6 shaders), Memories.
+  Each effect = one GPU shader used for BOTH the preview and the mp4 export
+  (what you see = what you get, effects baked into the file).
+- "Write text" = an LLM (via the Cloudflare Worker, key not in the app)
+  turns the user's text (Burmese OK) into a recipe of OUR effects; no
+  generative video (too expensive).
+
+## Editor step 1 - one photo -> video (16 Nov 2026 evening, testing)
+- `PhotoTemplates.kt`: 3 GLSL ES 1.0 templates (cinematic: slow push-in +
+  teal/orange + light leak; pulse: 120 bpm zoom punch + RGB split + shake;
+  retro: sepia, grain, flicker, weave, scratches, dust). Shared helpers:
+  coverUv (cover fit, zoom, pan), fadeInOut.
+- `PhotoVideoEngine.kt` (channel `flylab/editor`): photo decoded upright
+  (EXIF) <= 1600 px; preview = own GL thread + EGL window surface on a
+  Flutter texture (720x1280, ~30 fps, 8 s loop); export = same shader frame
+  by frame into an H.264 MediaCodec input surface (720x1280, 30 fps,
+  8 Mbit/s, I-frame 1 s) + MediaMuxer, then copied to the gallery
+  (Movies/FlyLab via MediaStore). No audio yet (step 4).
+- `lib/editor_lab.dart` + Lab home (`LabHome` in main.dart): Photo -> Video
+  / Camera Lab. `image_picker` ^1.2.2 added.
+
+## Editor plan (Ko approved, 16 Nov 2026)
+1. Engine + 3 templates from ONE photo (Cinematic Zoom, Pulse Zoom, Retro
+   Film): pick photo -> preview -> export mp4 (prove speed on the V2250)
+2. Cut-out templates (3D Pop, Future, ...)
+3. Template panel (tabs + animated preview cards, CapCut-style layout)
+4. Many photos -> slideshow + music
+5. Effects on existing videos
+6. Lite editor (trim / split / join / speed / text / music by hand)
+7. "Write text" -> recipe (AI)
+8. Merge into Fly -> post straight to Fly
+
+## Plan (Ko, 15 Nov 2026) - live camera (paused)
 1. ~~Lab + GPUPixel camera~~ 2. ~~Blur~~ 3. ~~Futuristic backgrounds~~ (edge polish open) (GPU
 shaders: cyber city, warp tunnel, matrix rain, hologram grid, galaxy /
 aurora, liquid chrome) + the user's own photo / video 4. Record (baked into

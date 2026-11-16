@@ -33,5 +33,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         // Channel "flylab/camera" - LabCamera.kt.
         LabCameraRegistrar.register(this, flutterEngine)
+        // Channel "flylab/editor" - PhotoVideoEngine.kt (editor step 1).
+        PhotoVideoRegistrar.register(this, flutterEngine)
     }
 }

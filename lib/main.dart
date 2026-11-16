@@ -25,6 +25,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'editor_lab.dart';
+
 void main() {
   runApp(const FlyLabApp());
 }
@@ -38,7 +40,72 @@ class FlyLabApp extends StatelessWidget {
       title: 'Fly Lab',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true),
-      home: const LabCameraScreen(),
+      home: const LabHome(),
+    );
+  }
+}
+
+/// Lab home (16 Nov 2026): the live camera tests (paused) and the new
+/// photo / video EDITOR (editor_lab.dart).
+class LabHome extends StatelessWidget {
+  const LabHome({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget tile(String title, String sub, IconData icon, List<Color> colors,
+        Widget page) {
+      return GestureDetector(
+        onTap: () => Navigator.push(
+            context, MaterialPageRoute(builder: (_) => page)),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: LinearGradient(colors: colors),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 40),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 4),
+                    Text(sub, style: const TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: const Row(children: [_LabBadge(), SizedBox(width: 10),
+          Text('Fly Lab')]),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          tile('Photo → Video', 'Editor step 1 - templates from one photo',
+              Icons.movie_filter,
+              const [Color(0xFFFF4B6E), Color(0xFF9C4DFF)],
+              const EditorLabScreen()),
+          tile('Camera Lab', 'Live cut-out + backgrounds (paused)',
+              Icons.videocam_outlined,
+              const [Color(0xFF00B8D4), Color(0xFF3A4DFF)],
+              const LabCameraScreen()),
+        ],
+      ),
     );
   }
 }

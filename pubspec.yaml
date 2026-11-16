@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   # Same version as Fly - asks for the camera permission.
   permission_handler: ^11.4.0
+  # Editor step 1 (16 Nov 2026): pick a photo (same version as Fly).
+  image_picker: ^1.2.2
 
 dev_dependencies:
   flutter_test:
