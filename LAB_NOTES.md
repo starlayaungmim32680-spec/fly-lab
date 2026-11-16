@@ -161,7 +161,7 @@ Build (arm64 only, ~20-150 s):
   video looks like the preview (Retro Film checked). Small fix for later:
   Retro Film's dust spots are hard black squares - make them round / soft.
 
-## Editor step 3 - templates by feeling + the user's own look (17 Nov 2026, testing)
+## Editor step 3 - templates by feeling + the user's own look: WORKS (17 Nov 2026, FlyLab-bn263210025)
 - Ko (17 Nov 00:03): NO background removal. The editor = put many kinds of
   effects on photos to make a video, users make it their own (adjust /
   filters), designed for how people FEEL; later the same for videos.
@@ -213,7 +213,8 @@ Build (arm64 only, ~20-150 s):
 ## Editor plan (Ko approved 16 Nov 2026, revised 17 Nov 2026)
 1. ~~Engine + 3 templates from ONE photo~~ (WORKS)
 2. ~~Cut-out templates~~ (DROPPED - no background removal)
-3. Templates by feeling + filters + adjust + length (testing)
+3. ~~Templates by feeling + filters + adjust + length~~ (WORKS 17 Nov 2026)
+   Ko: "OK - now MANY more, CapCut-like variety, but neat, each in its place"
 4. Many photos -> slideshow + music
 5. Effects on existing videos
 6. Lite editor (trim / split / join / speed / text / music by hand)
