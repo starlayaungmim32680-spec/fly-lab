@@ -35,5 +35,7 @@ class MainActivity : FlutterActivity() {
         LabCameraRegistrar.register(this, flutterEngine)
         // Channel "flylab/editor" - PhotoVideoEngine.kt (editor step 1).
         PhotoVideoRegistrar.register(this, flutterEngine)
+        // Channel "flylab/project" - ProjectEngine.kt (CapCut-style editor, E1a).
+        ProjectRegistrar.register(this, flutterEngine)
     }
 }

@@ -25,6 +25,17 @@ package com.aungdev.fly_lab
 //   passes: template -> effect -> effect (each pass reads the previous one
 //   from an offscreen texture: uFlipIn = 1 flips it the right way up); only
 //   the LAST pass (uFinal = 1) applies the user's look + the fade.
+//   Step 6 (17 Nov 2026): 21 more EFFECTS (33 in all) from Ko's ideas -
+//   big moon, sunrise, shooting stars, birds, falling leaves - and more:
+//   Sky (Moon, Sunrise, Shooting Stars, Birds, Clouds, Night Sky, Rainbow),
+//   Nature (Leaves, Sakura, Butterflies, Fireflies, Dandelion), Weather
+//   (Lightning, Fog), Light (Prism, Spotlight, Gold Glitter, Neon Frame),
+//   Party (Sky Lanterns, Heart Burst, Confetti). spectrum(h) in COMMON.
+//   Project editor E1a (17 Nov 2026): "plain" (the clip as it is) for
+//   clips with no template; uFade (x = fade in at the start, y = fade out
+//   at the end) so clips in the middle of a project don't dip to black.
+//   COMPOSE / COMPOSE_OES draw a photo or a video frame into the project's
+//   frame (fill, or fit with a blurred / colour background).
 //   Every template ends with finish(c): the user's FILTER (with strength)
 //   and ADJUST sliders (brightness, contrast, saturation, warmth, vignette,
 //   grain) are applied on top, then the fade in / out.
@@ -65,6 +76,7 @@ uniform vec4 uAdj;
 uniform vec4 uAdj2;
 uniform float uFinal;
 uniform float uFlipIn;
+uniform vec2 uFade;
 
 // Screen uv -> photo texture coords: "cover" fit (fills the frame, crops
 // the rest), zoom >= 1 goes closer, pan moves the view (photo units).
@@ -99,7 +111,8 @@ float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 float ease(float k) { k = clamp(k, 0.0, 1.0); return k * k * (3.0 - 2.0 * k); }
 // Soft fade in / out at the very start and end.
 float fadeInOut() {
-    return smoothstep(0.0, 0.5, uTime) * smoothstep(0.0, 0.5, uDur - uTime);
+    return mix(1.0, smoothstep(0.0, 0.5, uTime), uFade.x)
+         * mix(1.0, smoothstep(0.0, 0.5, uDur - uTime), uFade.y);
 }
 // Round-looking distance on the 9:16 frame.
 vec2 aspectD(vec2 a, vec2 b) { return (a - b) * vec2(uOutAspect, 1.0); }
@@ -127,6 +140,10 @@ float fbm(vec2 p) {
     float a = 0.5;
     for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
     return s;
+}
+// Rainbow colour, h 0..1 (0 = red).
+vec3 spectrum(float h) {
+    return clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
 }
 vec3 hueShift(vec3 c, float ang) {
     mat3 toY = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
@@ -169,6 +186,72 @@ vec4 finish(vec3 c) {
     return vec4(clamp(c, 0.0, 1.0) * fadeInOut(), 1.0);
 }
 """
+
+    // ================================================== project editor
+    /** Plain: the clip as it is (still gets the user's look + fades). */
+    private const val PLAIN = COMMON + """
+void main() {
+    gl_FragColor = finish(photo(coverUv(vUv, 1.0, vec2(0.0))));
+}
+"""
+
+    private const val COMPOSE_BODY = """
+uniform float uSrcAspect;
+uniform float uOutAspect;
+uniform float uFit;
+uniform float uBgMode;
+uniform vec3 uBgColor;
+vec2 coverSrc(vec2 uv) {
+    vec2 p = uv - 0.5;
+    float r = uSrcAspect / uOutAspect;
+    if (r > 1.0) p.x /= r; else p.y *= r;
+    return p + 0.5;
+}
+vec2 containSrc(vec2 uv) {
+    vec2 p = uv - 0.5;
+    float r = uSrcAspect / uOutAspect;
+    if (r > 1.0) p.y *= r; else p.x /= r;
+    return p + 0.5;
+}
+void main() {
+    vec3 c;
+    if (uFit < 0.5) {
+        c = src(clamp(coverSrc(vUv), 0.001, 0.999));
+    } else {
+        vec2 q = containSrc(vUv);
+        float inside = step(0.0, q.x) * step(q.x, 1.0) * step(0.0, q.y) * step(q.y, 1.0);
+        vec3 bg = uBgColor;
+        if (uBgMode < 0.5) {
+            vec2 b = coverSrc(vUv);
+            vec3 s = vec3(0.0);
+            for (int i = 0; i < 12; i++) {
+                float a = float(i) * 0.5236;
+                s += src(clamp(b + vec2(cos(a), sin(a)) * 0.045, 0.001, 0.999));
+            }
+            bg = s / 12.0 * 0.62;
+        }
+        c = mix(bg, src(clamp(q, 0.001, 0.999)), inside);
+    }
+    gl_FragColor = vec4(c, 1.0);
+}
+"""
+
+    /** Photo (row 0 = top) into the project frame. uv: y up. */
+    const val COMPOSE = """
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uSrc;
+vec3 src(vec2 uv) { return texture2D(uSrc, vec2(uv.x, 1.0 - uv.y)).rgb; }
+""" + COMPOSE_BODY
+
+    /** Video frame (SurfaceTexture, with its transform) into the frame. */
+    const val COMPOSE_OES = """#extension GL_OES_EGL_image_external : require
+precision highp float;
+varying vec2 vUv;
+uniform samplerExternalOES uSrc;
+uniform mat4 uSt;
+vec3 src(vec2 uv) { return texture2D(uSrc, (uSt * vec4(uv, 0.0, 1.0)).xy).rgb; }
+""" + COMPOSE_BODY
 
     // ================================================== step 1 templates
 
@@ -1394,7 +1477,433 @@ void main() {
 }
 """
 
+    // ================================================== step 6 EFFECTS
+
+    // ---------------- Sky
+    private const val FX_MOON = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    float k = ease(uTime / uDur);
+    float top = smoothstep(0.35, 1.0, vUv.y);
+    c = mix(c, c * vec3(0.78, 0.86, 1.08), 0.35 + 0.35 * top);
+    vec2 mc = vec2(0.76, 0.80 + 0.06 * k);
+    float R = 0.075;
+    vec2 q = aspectD(vUv, mc);
+    float d = length(q);
+    float out_ = max(d - R, 0.0);
+    c += vec3(0.85, 0.9, 1.0) * (exp(-out_ * 9.0) * 0.30 + exp(-out_ * 35.0) * 0.35) * step(R, d);
+    vec2 n = q / R;
+    float tex = 0.92 + 0.08 * fbm(n * 3.0 + 3.0);
+    tex -= 0.08 * smoothstep(0.55, 0.75, vnoise(n * 5.0 + 1.0));
+    tex -= 0.05 * smoothstep(0.6, 0.8, vnoise(n * 11.0 + 7.0));
+    float shade = 0.82 + 0.18 * sqrt(max(0.0, 1.0 - dot(n, n)));
+    vec3 mcol = min(vec3(1.08, 1.05, 0.96) * tex * shade, 1.0);
+    c = mix(c, mcol, smoothstep(R + 0.002, R - 0.002, d));
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_SUNRISE = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    float k = ease(uTime / uDur);
+    c = mix(c, c * vec3(1.1, 0.98, 0.84) + vec3(0.04, 0.015, 0.0), 0.3 + 0.4 * k);
+    vec2 sc = vec2(0.24, mix(0.72, 0.88, k));
+    vec2 q = aspectD(vUv, sc);
+    float d = length(q);
+    float R = 0.055;
+    c += vec3(1.0, 0.55, 0.2) * exp(-d * 3.0) * (0.2 + 0.2 * k);
+    float ang = atan(q.y, q.x);
+    float rays = pow(0.5 + 0.5 * sin(ang * 16.0 + uTime * 0.3), 6.0) * exp(-d * 2.5);
+    c += vec3(1.0, 0.8, 0.5) * rays * 0.25;
+    c += vec3(1.0, 0.85, 0.55) * exp(-max(d - R, 0.0) * 25.0) * 0.5;
+    c = mix(c, vec3(1.0, 0.93, 0.72), smoothstep(R, R - 0.004, d));
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_SHOOTING = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    vec2 dir = normalize(vec2(-0.75, -0.45));
+    for (int i = 0; i < 5; i++) {
+        float fi = float(i);
+        float per = 1.6 + 1.4 * hash(vec2(fi, 1.0));
+        float x = uTime / per + hash(vec2(fi, 2.0));
+        float ph = fract(x);
+        float n = floor(x);
+        if (ph < 0.4) {
+            float sk = ph / 0.4;
+            vec2 a = vec2(0.35 + 0.65 * hash(vec2(n, fi)), 0.72 + 0.26 * hash(vec2(n, fi + 9.0)));
+            vec2 head = a + vec2(dir.x / uOutAspect, dir.y) * sk * 0.55;
+            vec2 q = aspectD(vUv, head);
+            float along = dot(q, -dir);
+            float side = abs(dot(q, vec2(-dir.y, dir.x)));
+            float tail = step(0.0, along) * exp(-along * 9.0) * (1.0 - smoothstep(0.0, 0.003 + along * 0.01, side));
+            float hd = exp(-dot(q, q) * 9000.0);
+            c += vec3(0.9, 0.95, 1.0) * (tail + hd * 1.5) * (1.0 - sk * 0.7);
+        }
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_BIRDS = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    for (int f = 0; f < 2; f++) {
+        float ff = float(f);
+        float lead = -0.3 + fract(uTime * (0.055 + 0.02 * ff) + ff * 0.5) * 1.6;
+        float baseY = 0.80 - ff * 0.14;
+        float sz = 0.03 - ff * 0.008;
+        for (int i = 0; i < 7; i++) {
+            float fi = float(i);
+            float o = fi - 3.0;
+            vec2 p = vec2(lead - abs(o) * 0.055, baseY - abs(o) * 0.03 + 0.008 * sin(uTime * 2.0 + fi));
+            vec2 q = aspectD(vUv, p) / sz;
+            if (abs(q.x) < 1.3 && abs(q.y) < 1.6) {
+                float flap = sin(uTime * 9.0 + fi * 1.3 + ff * 2.0);
+                float x = clamp(q.x, -1.0, 1.0);
+                float yw = flap * 0.6 * abs(x) - 0.25 * x * x;
+                float th = 0.16 * (1.0 - abs(x)) + 0.05;
+                float m = (1.0 - smoothstep(th * 0.6, th, abs(q.y - yw))) * step(abs(q.x), 1.0);
+                m = max(m, smoothstep(0.25, 0.15, length(q * vec2(1.0, 1.6))));
+                c = mix(c, vec3(0.06, 0.06, 0.08), m * (0.9 - 0.25 * ff));
+            }
+        }
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_CLOUDS = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    float x = vUv.x * uOutAspect;
+    float f = fbm(vec2(x * 2.5 + uTime * 0.03, vUv.y * 4.0));
+    float f2 = fbm(vec2(x * 5.0 + uTime * 0.05, vUv.y * 7.0) + 4.0);
+    float amt = smoothstep(0.48, 0.75, f * 0.8 + f2 * 0.3) * smoothstep(0.66, 0.92, vUv.y);
+    vec3 cloud = mix(vec3(0.8, 0.83, 0.9), vec3(1.0), smoothstep(0.5, 0.8, f2));
+    c = mix(c, cloud, amt * 0.8);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_NIGHT_SKY = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    float top = smoothstep(0.4, 1.0, vUv.y);
+    c = mix(c, c * 0.4 + vec3(0.02, 0.03, 0.12), top * 0.85);
+    float band = exp(-pow((vUv.y - 0.9 + (vUv.x - 0.5) * 0.4) * 6.0, 2.0)) * top;
+    c += vec3(0.35, 0.3, 0.55) * band * fbm(vUv * vec2(8.0, 4.0) + uTime * 0.02) * 0.6;
+    for (int i = 0; i < 2; i++) {
+        float fi = float(i);
+        vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * (30.0 + fi * 25.0);
+        vec2 cell = floor(g);
+        float hs = hash(cell + fi * 3.0);
+        if (hs > 0.9) {
+            vec2 ff = fract(g) - 0.5 - (vec2(hash(cell + 2.0), hash(cell + 5.0)) - 0.5) * 0.6;
+            float tw = 0.4 + 0.6 * pow(0.5 + 0.5 * sin(uTime * (2.0 + 3.0 * hs) + hs * 50.0), 2.0);
+            c += vec3(0.9, 0.95, 1.0) * smoothstep(0.1, 0.0, length(ff)) * tw * top * (1.3 - 0.4 * fi);
+        }
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_RAINBOW = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    vec2 q = aspectD(vUv, vec2(0.5, 0.12));
+    float r = length(q);
+    float t = (r - 0.48) / 0.075;
+    float a = smoothstep(0.0, 0.15, t) * smoothstep(1.0, 0.85, t) * ease(uTime / 1.5) * smoothstep(0.2, 0.4, vUv.y);
+    c += spectrum((1.0 - clamp(t, 0.0, 1.0)) * 0.8) * a * 0.28;
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Nature
+    private const val FX_LEAVES = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    for (int i = 0; i < 12; i++) {
+        float fi = float(i);
+        float sp = 0.06 + 0.05 * hash(vec2(fi, 1.0));
+        float y = 1.15 - fract(hash(vec2(fi, 2.0)) + uTime * sp) * 1.3;
+        float x = hash(vec2(fi, 3.0)) + 0.07 * sin(uTime * 1.1 + fi * 2.0);
+        vec2 q = aspectD(vUv, vec2(x, y));
+        float a = uTime * (0.8 + hash(vec2(fi, 4.0))) + fi;
+        q = vec2(cos(a) * q.x + sin(a) * q.y, -sin(a) * q.x + cos(a) * q.y);
+        float sz = 0.025 + 0.015 * hash(vec2(fi, 5.0));
+        q /= sz;
+        q.x /= 0.3 + 0.7 * abs(cos(uTime * 1.5 + fi));
+        float w = (1.0 - q.y * q.y) * 0.45;
+        float m = smoothstep(0.03, -0.03, abs(q.x) - w) * step(abs(q.y), 1.0);
+        float vein = 1.0 - smoothstep(0.02, 0.06, abs(q.x));
+        vec3 col = mix(vec3(0.85, 0.3, 0.08), vec3(0.95, 0.7, 0.15), hash(vec2(fi, 6.0)));
+        col = mix(col, col * 0.6, vein);
+        c = mix(c, col, m * 0.95);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_SAKURA = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    for (int i = 0; i < 16; i++) {
+        float fi = float(i);
+        float sp = 0.05 + 0.05 * hash(vec2(fi, 1.0));
+        float y = 1.1 - fract(hash(vec2(fi, 2.0)) + uTime * sp) * 1.25;
+        float x = fract(hash(vec2(fi, 3.0)) + uTime * 0.025) + 0.04 * sin(uTime + fi);
+        vec2 q = aspectD(vUv, vec2(x, y));
+        float sz = 0.016 + 0.01 * hash(vec2(fi, 4.0));
+        q /= sz;
+        float a = atan(q.y, q.x) + uTime * (1.0 + hash(vec2(fi, 5.0)));
+        float r = length(q);
+        float petal = 0.55 + 0.45 * abs(cos(2.5 * a));
+        float m = smoothstep(petal, petal - 0.12, r);
+        vec3 col = mix(vec3(1.0, 0.72, 0.82), vec3(1.0, 0.92, 0.95), smoothstep(0.9, 0.2, r));
+        col = mix(col, vec3(1.0, 0.5, 0.65), smoothstep(0.22, 0.0, r));
+        c = mix(c, col, m * 0.92);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_BUTTERFLIES = COMMON + """
+float ell(vec2 p, vec2 cen, vec2 rad) { return smoothstep(1.0, 0.88, length((p - cen) / rad)); }
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    for (int i = 0; i < 5; i++) {
+        float fi = float(i);
+        vec2 p = vec2(fract(hash(vec2(fi, 1.0)) + uTime * 0.045) * 1.2 - 0.1,
+                      0.25 + 0.55 * hash(vec2(fi, 2.0)) + 0.05 * sin(uTime * 1.6 + fi * 2.0));
+        float s = 0.03 + 0.01 * hash(vec2(fi, 3.0));
+        vec2 q = aspectD(vUv, p) / s;
+        if (abs(q.x) < 1.4 && abs(q.y) < 1.4) {
+            float flap = 0.2 + 0.8 * abs(sin(uTime * 11.0 + fi * 1.7));
+            vec2 w = vec2(abs(q.x) / flap, q.y);
+            float up = ell(w, vec2(0.55, 0.32), vec2(0.55, 0.5));
+            float lo = ell(w, vec2(0.42, -0.32), vec2(0.4, 0.36));
+            float m = max(up, lo);
+            vec3 col = clamp(hueShift(vec3(1.0, 0.45, 0.1), hash(vec2(fi, 4.0)) * 6.283), 0.0, 1.0);
+            col = mix(col * 0.35, col, smoothstep(1.0, 0.4, length(w - vec2(0.5, 0.0))));
+            float body = (1.0 - smoothstep(0.05, 0.09, abs(q.x))) * step(abs(q.y), 0.6);
+            c = mix(c, col, m * 0.95);
+            c = mix(c, vec3(0.08), body);
+        }
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_FIREFLIES = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0))) * 0.85;
+    for (int i = 0; i < 18; i++) {
+        float fi = float(i);
+        vec2 p = vec2(hash(vec2(fi, 1.0)), hash(vec2(fi, 2.0)) * 0.9 + 0.05);
+        p += 0.08 * vec2(sin(uTime * 0.5 * (hash(vec2(fi, 3.0)) + 0.5) + fi), cos(uTime * 0.4 * (hash(vec2(fi, 4.0)) + 0.5) + fi * 1.3));
+        float blink = 0.5 + 0.5 * sin(uTime * (1.5 + 2.0 * hash(vec2(fi, 5.0))) + fi * 3.0);
+        float d = length(aspectD(vUv, p));
+        c += vec3(1.0, 0.88, 0.4) * (exp(-d * d * 6000.0) + exp(-d * d * 300.0) * 0.35) * blink;
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_DANDELION = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    for (int i = 0; i < 12; i++) {
+        float fi = float(i);
+        float y = -0.1 + fract(hash(vec2(fi, 1.0)) + uTime * (0.03 + 0.03 * hash(vec2(fi, 2.0)))) * 1.25;
+        float x = fract(hash(vec2(fi, 3.0)) + uTime * 0.02) + 0.05 * sin(uTime * 0.9 + fi * 1.7);
+        vec2 q = aspectD(vUv, vec2(x, y));
+        float s = 0.022 + 0.012 * hash(vec2(fi, 4.0));
+        q /= s;
+        float r = length(q);
+        float a = atan(q.y, q.x) + uTime * 0.5 + fi;
+        float spoke = (1.0 - smoothstep(0.0, 0.12, abs(fract(a / 0.5236) - 0.5) * r)) * step(r, 1.0) * step(0.15, r);
+        float tip = smoothstep(0.25, 0.0, abs(r - 0.95)) * 0.6;
+        float core = smoothstep(0.2, 0.08, r);
+        c = mix(c, vec3(1.0), clamp(spoke * 0.55 + tip * 0.5 + core, 0.0, 1.0) * 0.85);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Weather
+    private const val FX_LIGHTNING = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0))) * vec3(0.8, 0.86, 0.95);
+    float per = 2.6;
+    float n = floor(uTime / per);
+    float tt = uTime - n * per;
+    float flash = (exp(-tt * 14.0) + 0.6 * step(0.12, tt) * exp(-(tt - 0.12) * 12.0)) * step(0.0, tt);
+    float x0 = 0.25 + 0.5 * hash(vec2(n, 1.0));
+    float yEnd = 0.35 + 0.2 * hash(vec2(n, 2.0));
+    float bx = x0 + (vnoise(vec2(vUv.y * 8.0, n * 7.0)) - 0.5) * 0.14 + (vnoise(vec2(vUv.y * 32.0, n * 7.0 + 5.0)) - 0.5) * 0.035;
+    float dist = abs(vUv.x - bx) * uOutAspect;
+    float on = step(yEnd, vUv.y) * smoothstep(yEnd, yEnd + 0.05, vUv.y);
+    float bolt = (exp(-dist * dist * 60000.0) + exp(-dist * dist * 1500.0) * 0.35) * on;
+    c += vec3(0.85, 0.9, 1.0) * (bolt * 1.5 + 0.35) * flash;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_FOG = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    float f = fbm(vec2(vUv.x * uOutAspect * 3.0 + uTime * 0.08, vUv.y * 3.0 - uTime * 0.02));
+    float f2 = fbm(vec2(vUv.x * uOutAspect * 6.0 - uTime * 0.05, vUv.y * 5.0) + 7.0);
+    float amt = smoothstep(0.35, 0.8, f * 0.7 + f2 * 0.4) * (0.45 + 0.55 * (1.0 - vUv.y));
+    c = mix(c, vec3(0.86, 0.89, 0.93), amt * 0.6);
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Light
+    private const val FX_PRISM = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    float pos = -0.3 + fract(uTime * 0.12) * 1.8;
+    float u = (vUv.x * uOutAspect + vUv.y * 0.55) - pos;
+    float band = smoothstep(0.0, 0.05, u) * smoothstep(0.28, 0.18, u);
+    vec3 col = spectrum(clamp(u / 0.28, 0.0, 1.0) * 0.85);
+    c = 1.0 - (1.0 - c) * (1.0 - col * band * 0.45);
+    float u2 = (vUv.x * uOutAspect - vUv.y * 0.3) - (1.2 - fract(uTime * 0.08 + 0.5) * 1.6);
+    float band2 = smoothstep(0.0, 0.03, u2) * smoothstep(0.12, 0.07, u2);
+    c = 1.0 - (1.0 - c) * (1.0 - spectrum(clamp(u2 / 0.12, 0.0, 1.0) * 0.85) * band2 * 0.3);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_SPOTLIGHT = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    vec2 apex = vec2(0.5 + 0.22 * sin(uTime * 0.7), 1.08);
+    vec2 d = aspectD(vUv, apex);
+    float ang = atan(d.x, -d.y);
+    float cone = smoothstep(0.24, 0.15, abs(ang - 0.25 * sin(uTime * 0.7 + 0.6)));
+    c = c * mix(0.45, 1.25, cone) + vec3(1.0, 0.95, 0.8) * cone * 0.08;
+    vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * 30.0 + vec2(0.0, uTime * 0.6);
+    vec2 cell = floor(g);
+    if (hash(cell) > 0.93) c += vec3(1.0, 0.95, 0.85) * smoothstep(0.12, 0.0, length(fract(g) - 0.5)) * cone * 0.5;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_GOLD = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    for (int i = 0; i < 3; i++) {
+        float fi = float(i);
+        float s = 12.0 + fi * 10.0;
+        vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * s;
+        g.y += uTime * (0.6 + 0.4 * fi) * (s / 12.0) * 0.5;
+        g.x += sin(uTime * 0.8 + fi + g.y * 0.4) * 0.25;
+        vec2 cell = floor(g);
+        float hs = hash(cell + fi * 13.0);
+        if (hs > 0.6) {
+            vec2 f = fract(g) - 0.5 - (vec2(hash(cell + 3.1), hash(cell + 7.7)) - 0.5) * 0.5;
+            float tw = pow(0.5 + 0.5 * sin(uTime * (4.0 + 6.0 * hs) + hs * 80.0), 4.0);
+            float dot_ = smoothstep(0.07, 0.02, length(f));
+            float st = (max(0.0, 1.0 - abs(f.x) * 16.0 - abs(f.y) * 3.0) + max(0.0, 1.0 - abs(f.y) * 16.0 - abs(f.x) * 3.0)) * tw;
+            c += vec3(1.0, 0.78, 0.3) * (dot_ * 0.7 + st * 0.8);
+        }
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_NEON_FRAME = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    vec2 p = (vUv - 0.5) * uRes;
+    float inset = uRes.x * 0.045;
+    float r = uRes.x * 0.06;
+    vec2 q = abs(p) - (uRes * 0.5 - inset) + r;
+    float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+    float px = uRes.x / 720.0;
+    float line = exp(-abs(sd) / (2.2 * px));
+    float glow = exp(-abs(sd) / (16.0 * px));
+    float h = atan(p.y, p.x) / 6.2832 + uTime * 0.15;
+    vec3 col = mix(vec3(1.0, 0.2, 0.75), vec3(0.15, 0.85, 1.0), 0.5 + 0.5 * sin(h * 6.2832 * 2.0));
+    float pulse = 0.8 + 0.2 * sin(uTime * 6.0);
+    c += col * (line * 1.3 + glow * 0.45) * pulse;
+    gl_FragColor = finish(c);
+}
+"""
+
+    // ---------------- Party
+    private const val FX_LANTERNS = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    c = mix(c, c * vec3(0.85, 0.82, 0.95), 0.3);
+    for (int i = 0; i < 10; i++) {
+        float fi = float(i);
+        float depth = hash(vec2(fi, 9.0));
+        float y = -0.15 + fract(hash(vec2(fi, 1.0)) + uTime * (0.025 + 0.035 * depth)) * 1.35;
+        float x = hash(vec2(fi, 2.0)) + 0.03 * sin(uTime * 0.7 + fi * 1.9);
+        float s = 0.018 + 0.03 * depth;
+        vec2 q = aspectD(vUv, vec2(x, y)) / s;
+        float flick = 0.85 + 0.15 * sin(uTime * 9.0 + fi * 3.0);
+        c += vec3(1.0, 0.55, 0.15) * exp(-dot(q, q) * 0.35) * 0.30 * flick * (0.5 + 0.5 * depth);
+        float w = 0.55 + 0.12 * q.y;
+        float m = smoothstep(0.06, -0.06, abs(q.x) - w) * smoothstep(0.06, -0.06, abs(q.y) - 0.8);
+        vec3 col = mix(vec3(1.0, 0.45, 0.1), vec3(1.0, 0.9, 0.5), smoothstep(0.8, -0.8, q.y)) * flick;
+        c = mix(c, col, m * (0.6 + 0.4 * depth));
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_HEART_BURST = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    float n = floor(uTime);
+    float bt = fract(uTime);
+    vec2 cen = vec2(0.5, 0.55);
+    for (int i = 0; i < 10; i++) {
+        float fi = float(i);
+        float a = fi / 10.0 * 6.2832 + hash(vec2(n, 1.0));
+        float dist = (0.12 + 0.1 * hash(vec2(n, fi))) * ease(bt * 1.4);
+        vec2 p = cen + vec2(cos(a) / uOutAspect, sin(a)) * dist;
+        float s = 0.03 * (0.4 + bt);
+        vec2 q = aspectD(vUv, p) / s;
+        float m = smoothstep(-0.06, 0.04, heartD(q * 0.8)) * (1.0 - smoothstep(0.55, 1.0, bt));
+        vec3 col = mix(vec3(1.0, 0.2, 0.4), vec3(1.0, 0.6, 0.8), hash(vec2(fi, n)));
+        c = mix(c, col, m * 0.85);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_CONFETTI = COMMON + """
+void main() {
+    vec3 c = photo(coverUv(vUv, 1.0, vec2(0.0)));
+    for (int i = 0; i < 40; i++) {
+        float fi = float(i);
+        float sp = 0.10 + 0.08 * hash(vec2(fi, 1.0));
+        float y = 1.1 - fract(hash(vec2(fi, 2.0)) + uTime * sp) * 1.25;
+        float x = hash(vec2(fi, 3.0)) + 0.04 * sin(uTime * 2.0 + fi);
+        vec2 q = aspectD(vUv, vec2(x, y));
+        float a = uTime * (2.0 + 2.0 * hash(vec2(fi, 4.0))) + fi;
+        q = vec2(cos(a) * q.x + sin(a) * q.y, -sin(a) * q.x + cos(a) * q.y);
+        float fl = abs(cos(uTime * 4.0 + fi * 1.7));
+        float m = step(abs(q.x), 0.013) * step(abs(q.y), 0.008 * fl + 0.0015);
+        vec3 col = clamp(hueShift(vec3(1.0, 0.25, 0.3), hash(vec2(fi, 5.0)) * 6.283), 0.0, 1.0);
+        c = mix(c, col * (0.7 + 0.3 * fl), m);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
     val fragments: Map<String, String> = mapOf(
+        "plain" to PLAIN,
         "cinematic" to CINEMATIC,
         "pulse" to PULSE,
         "retro" to RETRO,
@@ -1449,6 +1958,27 @@ void main() {
         "fx_film" to FX_FILM,
         "fx_fireworks" to FX_FIREWORKS,
         "fx_balloons" to FX_BALLOONS,
+        "fx_moon" to FX_MOON,
+        "fx_sunrise" to FX_SUNRISE,
+        "fx_shooting" to FX_SHOOTING,
+        "fx_birds" to FX_BIRDS,
+        "fx_clouds" to FX_CLOUDS,
+        "fx_night_sky" to FX_NIGHT_SKY,
+        "fx_rainbow" to FX_RAINBOW,
+        "fx_leaves" to FX_LEAVES,
+        "fx_sakura" to FX_SAKURA,
+        "fx_butterflies" to FX_BUTTERFLIES,
+        "fx_fireflies" to FX_FIREFLIES,
+        "fx_dandelion" to FX_DANDELION,
+        "fx_lightning" to FX_LIGHTNING,
+        "fx_fog" to FX_FOG,
+        "fx_prism" to FX_PRISM,
+        "fx_spotlight" to FX_SPOTLIGHT,
+        "fx_gold" to FX_GOLD,
+        "fx_neon_frame" to FX_NEON_FRAME,
+        "fx_lanterns" to FX_LANTERNS,
+        "fx_heart_burst" to FX_HEART_BURST,
+        "fx_confetti" to FX_CONFETTI,
     )
 
     /** The time used for the template's thumbnail card. */
@@ -1460,6 +1990,10 @@ void main() {
         "kaleido" -> 3.0f
         "vertigo" -> 4.0f
         "fx_fireworks" -> 1.9f
+        "fx_shooting" -> 0.35f
+        "fx_lightning" -> 2.65f
+        "fx_heart_burst" -> 2.45f
+        "fx_rainbow" -> 4.0f
         else -> 2.6f
     }
 }

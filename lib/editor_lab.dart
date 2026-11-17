@@ -24,6 +24,10 @@
 // Rays, Lens Flare, Bubbles, Film Strip, Fireworks, Balloons) - tick up to
 // 3, they stack on top of the template in the order they were picked
 // ("setTemplate" {ids: [template, effect...]}).
+//
+// Step 6 (17 Nov 2026): 21 more effects from Ko's ideas (moon, sunrise,
+// shooting stars, birds, falling leaves ...) -> 33 effects, sorted into
+// their own tabs: Sky, Nature, Weather, Light, Party, Retro.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -141,20 +145,50 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     _Tpl('sketch', 'Sketch', 'Art'),
     _Tpl('duotone', 'Duotone', 'Art'),
   ];
-  // Effects: made to stack on top of any template (max 3).
+  // Effects: made to stack on top of any template (max 3). Each lives in
+  // ONE effect category.
   static const List<_Tpl> _effects = [
-    _Tpl('fx_sparkle', 'Sparkle', 'Effect'),
-    _Tpl('fx_hearts', 'Hearts', 'Effect'),
-    _Tpl('fx_snow', 'Snow', 'Effect'),
-    _Tpl('fx_rain', 'Rain', 'Effect'),
-    _Tpl('fx_bokeh', 'Bokeh', 'Effect'),
-    _Tpl('fx_dust', 'Film Dust', 'Effect'),
-    _Tpl('fx_rays', 'Light Rays', 'Effect'),
-    _Tpl('fx_flare', 'Lens Flare', 'Effect'),
-    _Tpl('fx_bubbles', 'Bubbles', 'Effect'),
-    _Tpl('fx_film', 'Film Strip', 'Effect'),
-    _Tpl('fx_fireworks', 'Fireworks', 'Effect'),
-    _Tpl('fx_balloons', 'Balloons', 'Effect'),
+    _Tpl('fx_moon', 'Big Moon', 'Sky'),
+    _Tpl('fx_sunrise', 'Sunrise', 'Sky'),
+    _Tpl('fx_shooting', 'Shooting Stars', 'Sky'),
+    _Tpl('fx_night_sky', 'Night Sky', 'Sky'),
+    _Tpl('fx_birds', 'Birds', 'Sky'),
+    _Tpl('fx_clouds', 'Clouds', 'Sky'),
+    _Tpl('fx_rainbow', 'Rainbow', 'Sky'),
+    _Tpl('fx_leaves', 'Falling Leaves', 'Nature'),
+    _Tpl('fx_sakura', 'Sakura', 'Nature'),
+    _Tpl('fx_butterflies', 'Butterflies', 'Nature'),
+    _Tpl('fx_fireflies', 'Fireflies', 'Nature'),
+    _Tpl('fx_dandelion', 'Dandelion', 'Nature'),
+    _Tpl('fx_bubbles', 'Bubbles', 'Nature'),
+    _Tpl('fx_snow', 'Snow', 'Weather'),
+    _Tpl('fx_rain', 'Rain', 'Weather'),
+    _Tpl('fx_lightning', 'Lightning', 'Weather'),
+    _Tpl('fx_fog', 'Fog', 'Weather'),
+    _Tpl('fx_sparkle', 'Sparkle', 'Light'),
+    _Tpl('fx_gold', 'Gold Glitter', 'Light'),
+    _Tpl('fx_bokeh', 'Bokeh', 'Light'),
+    _Tpl('fx_rays', 'Light Rays', 'Light'),
+    _Tpl('fx_flare', 'Lens Flare', 'Light'),
+    _Tpl('fx_prism', 'Prism', 'Light'),
+    _Tpl('fx_spotlight', 'Spotlight', 'Light'),
+    _Tpl('fx_neon_frame', 'Neon Frame', 'Light'),
+    _Tpl('fx_lanterns', 'Sky Lanterns', 'Party'),
+    _Tpl('fx_fireworks', 'Fireworks', 'Party'),
+    _Tpl('fx_balloons', 'Balloons', 'Party'),
+    _Tpl('fx_confetti', 'Confetti', 'Party'),
+    _Tpl('fx_hearts', 'Hearts', 'Party'),
+    _Tpl('fx_heart_burst', 'Heart Burst', 'Party'),
+    _Tpl('fx_dust', 'Film Dust', 'Retro'),
+    _Tpl('fx_film', 'Film Strip', 'Retro'),
+  ];
+  static const List<String> _fxCats = [
+    'Sky',
+    'Nature',
+    'Weather',
+    'Light',
+    'Party',
+    'Retro',
   ];
   static const int _maxFx = 3;
   static const List<String> _cats = [
@@ -199,6 +233,7 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
   Map<String, Uint8List> _thumbs = const {};
   int _tab = 0; // 0 templates, 1 effects, 2 filters, 3 adjust, 4 length
   List<String> _fx = const [];
+  String _fxCat = 'Sky';
   int _seconds = 8;
   bool _loading = false;
   bool _exporting = false;
@@ -448,9 +483,36 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
     );
   }
 
+  Widget _catRow(List<String> cats, String cur, ValueChanged<String> onPick) {
+    return SizedBox(
+      height: 30,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        children: [
+          for (final String c in cats)
+            GestureDetector(
+              onTap: () => onPick(c),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 9),
+                child: Center(
+                  child: Text(c,
+                      style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight:
+                              cur == c ? FontWeight.w800 : FontWeight.w500,
+                          color: cur == c ? Colors.white : Colors.white54)),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _effectsPanel() {
     return SizedBox(
-      height: 158,
+      height: 188,
       child: Column(
         children: [
           SizedBox(
@@ -460,7 +522,9 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: Text(
-                    'Tap to add on top of the template (up to $_maxFx)',
+                    _fx.isEmpty
+                        ? 'Tap to add on top of the template (up to $_maxFx)'
+                        : '${_fx.length} / $_maxFx effects added',
                     style: const TextStyle(fontSize: 12, color: Colors.white70),
                   ),
                 ),
@@ -476,13 +540,14 @@ class _EditorLabScreenState extends State<EditorLabScreen> {
               ],
             ),
           ),
+          _catRow(_fxCats, _fxCat, (c) => setState(() => _fxCat = c)),
           SizedBox(
             height: 128,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
               children: [
-                for (final _Tpl t in _effects)
+                for (final _Tpl t in _effects.where((e) => e.cat == _fxCat))
                   _card(t,
                       selected: _fx.contains(t.id),
                       badge: _fx.contains(t.id) ? _fx.indexOf(t.id) + 1 : 0,

@@ -161,6 +161,65 @@ Build (arm64 only, ~20-150 s):
   video looks like the preview (Retro Film checked). Small fix for later:
   Retro Film's dust spots are hard black squares - make them round / soft.
 
+## Project editor E1a - project + timeline (17 Nov 2026 night, testing)
+- Ko: "the free way, as good as possible" -> everything on the phone, no
+  server, no paid API. Captions later with an on-device open-source
+  Whisper model; Generate media / AI avatar not planned.
+- New Lab tile "New Project" -> lib/project_editor.dart (catalog shared in
+  lib/fly_catalog.dart). Engine: ProjectEngine.kt, channel
+  "flylab/project"; helpers LabImages.kt. Photo -> Video stays as it was.
+- Pick MANY photos + videos (pickMultipleMedia). Timeline strip scrolls
+  under a fixed white playhead (56 px / s), play / pause, scrub by drag,
+  tap a clip = select (Edit panel). Toolbar: Edit (Duration for photos,
+  Template, Move left / right, Delete), Templates (per clip, preview cards
+  from the clip's own picture, "Apply to all"), Effects (max 3, on every
+  clip), Filters, Adjust, Ratio (9:16 / 1:1 / 4:5 / 16:9 + Fill / Fit),
+  Background (Blur or a colour, shown with Fit), Add, Export.
+- Each frame: COMPOSE (photo texture or video OES frame -> project frame,
+  fill / fit + background) -> clip TEMPLATE (clip time; "plain" = none) ->
+  EFFECTS (project time); only the last pass applies look + fade; uFade
+  keeps clips in the middle from dipping to black.
+- Video preview = muted MediaPlayer -> SurfaceTexture (max 3 players);
+  export = MediaExtractor + MediaCodec -> SurfaceTexture, frame-exact.
+  Sizes: 9:16 720x1280, 1:1 720x720, 4:5 768x960, 16:9 1280x720.
+- Checked here: Kotlin compiled with kotlinc 2.1 + android-33 jar (+ small
+  Flutter stubs); compose + template chain rendered on the PC emulator.
+  Dart NOT analysed here (no Flutter) - flutter analyze on Ko's PC.
+- E1b next: split, trim, speed, duplicate, drag to reorder.
+
+## CapCut-style editor - plan (Ko approved 17 Nov 2026: "the free way")
+Ko showed CapCut's toolbar (Edit, Audio, Text, Effects, Overlay, Captions,
+Filters, Adjust, Stickers, Generate media, AI avatar, Transcript, Aspect
+ratio, Background, Templates) and asked for the same.
+Base change: from "one photo" to a PROJECT = a timeline of clips (photos
+AND videos) + layers (text, stickers, overlays) + an audio track, all drawn
+by the same GPU engine and baked into one mp4.
+  E1 Project + timeline: many photos / videos, order, Edit (trim, split,
+     delete, duration, speed), Aspect ratio (9:16, 1:1, 16:9), Background
+     (blur / colour) - templates + effects + filters per clip
+  E2 Audio: music from the phone + volume + fade, original video sound
+  E3 Text: styles, fonts (Myanmar too), colours, animations (in / out)
+  E4 Stickers + Overlay (photo / video on top, move / pinch / rotate)
+  E5 Transitions between clips
+  E6 Captions / Transcript - needs speech-to-text (server, costs money):
+     later, maybe via the Cloudflare Worker
+  Not planned now: Generate media / AI avatar (paid cloud AI models).
+
+## Editor step 6 - 21 more effects from Ko's ideas: WORKS (17 Nov 2026, FlyLab-bn263210141)
+- Ko: "big moon, sunrise, falling leaves, shooting stars, birds flying -
+  lots more, use your own ideas too".
+- New effects (33 in all), Effects tab now has its own category tabs:
+  Sky (Big Moon, Sunrise, Shooting Stars, Night Sky, Birds, Clouds,
+  Rainbow) / Nature (Falling Leaves, Sakura, Butterflies, Fireflies,
+  Dandelion, Bubbles) / Weather (Snow, Rain, Lightning, Fog) / Light
+  (Sparkle, Gold Glitter, Bokeh, Light Rays, Lens Flare, Prism, Spotlight,
+  Neon Frame) / Party (Sky Lanterns, Fireworks, Balloons, Confetti, Hearts,
+  Heart Burst) / Retro (Film Dust, Film Strip).
+- Sky things sit in the TOP of the frame (moon top-right, sun top-left) so
+  they don't cover faces. spectrum(h) added to COMMON. 75 shaders checked
+  with glslangValidator + rendered (also chains: Night Sky + Moon +
+  Shooting Stars, Golden Hour + Birds + Leaves, Memory + Lanterns).
+
 ## Editor step 5 - COMBINE + more: WORKS (17 Nov 2026, FlyLab-bn263210118)
 - Ko's test video: template + Snow + Bokeh + Fireworks, 8 s, 240 frames,
   4.1 MB, all layers baked in, right way up. Note: several BRIGHT layers

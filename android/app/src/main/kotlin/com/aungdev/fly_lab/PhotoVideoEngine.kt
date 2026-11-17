@@ -259,6 +259,7 @@ class PhotoRenderer {
         GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uAdj2"), adj[4], adj[5], adj[6], adj[7])
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFinal"), finalPass)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFlipIn"), flipIn)
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(p, "uFade"), 1f, 1f)
         GLES20.glEnableVertexAttribArray(0)
         GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, quad)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)

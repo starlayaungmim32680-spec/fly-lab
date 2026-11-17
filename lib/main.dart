@@ -26,6 +26,7 @@ import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'editor_lab.dart';
+import 'project_editor.dart';
 
 void main() {
   runApp(const FlyLabApp());
@@ -100,6 +101,10 @@ class LabHome extends StatelessWidget {
               Icons.movie_filter,
               const [Color(0xFFFF4B6E), Color(0xFF9C4DFF)],
               const EditorLabScreen()),
+          tile('New Project', 'CapCut-style editor - photos + videos, timeline',
+              Icons.video_library_outlined,
+              const [Color(0xFFFFB300), Color(0xFFFF4B6E)],
+              const ProjectEditorScreen()),
           tile('Camera Lab', 'Live cut-out + backgrounds (paused)',
               Icons.videocam_outlined,
               const [Color(0xFF00B8D4), Color(0xFF3A4DFF)],
