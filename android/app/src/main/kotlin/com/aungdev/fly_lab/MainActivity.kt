@@ -1,6 +1,7 @@
 package com.aungdev.fly_lab
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
@@ -27,6 +28,12 @@ class MainActivity : FlutterActivity() {
             old?.uncaughtException(t, e)
         }
         super.onCreate(savedInstanceState)
+    }
+
+    // E2 Audio: the music picker answers here.
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (AudioPick.onResult(requestCode, resultCode, data)) return
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

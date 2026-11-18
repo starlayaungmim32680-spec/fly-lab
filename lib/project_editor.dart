@@ -11,6 +11,9 @@
 // under a fixed white playhead, and a bottom toolbar (Edit, Templates,
 // Effects, Filters, Adjust, Ratio, Background, Add). A tool opens its
 // panel in place of the toolbar; the tick closes it.
+// E2 Audio (19 Nov 2026): Audio tool - Add music from the phone (green
+// bars on an audio track: drag, trim, volume, fade in / out), the clips'
+// own sound on / off, and a Volume per video clip (Edit -> Volume).
 // Effects (18 Nov 2026): an EFFECTS TRACK like CapCut - each effect is a
 // bar under the clips (tap a card = a 3 s bar at the playhead; drag the bar
 // / its ends), and can be placed on the video (a circle: drag + pinch).
@@ -52,6 +55,9 @@ class _Clip {
   /// footage takes half the timeline time.
   double speed = 1;
 
+  /// The clip's own sound (video): 0 = mute, 1 = as recorded, 2 = louder.
+  double vol = 1;
+
   /// The longest this clip can be on the timeline: the source left from
   /// [from] on, played at [speed].
   double get maxDur => video
@@ -65,6 +71,7 @@ class _Clip {
         'template': template,
         'from': from,
         'speed': speed,
+        'vol': vol,
       };
 }
 
@@ -94,11 +101,48 @@ class _Fx {
       };
 }
 
+/// One music bar on the AUDIO TRACK (E2): plays the song from [from] on,
+/// on the project from [start] to [end], at [vol] with fades.
+class _Audio {
+  _Audio({
+    required this.uid,
+    required this.path,
+    required this.name,
+    required this.srcDur,
+    required this.start,
+    required this.end,
+  });
+  final int uid;
+  final String path;
+  final String name;
+  final double srcDur;
+  double start;
+  double end;
+  double from = 0;
+  double vol = 1;
+  double fadeIn = 0;
+  double fadeOut = 0;
+
+  Map<String, Object> toMap() => {
+        'uid': uid,
+        'path': path,
+        'start': start,
+        'end': end,
+        'from': from,
+        'vol': vol,
+        'fadeIn': fadeIn,
+        'fadeOut': fadeOut,
+      };
+}
+
 enum _Panel {
   none,
   edit,
   duration,
   speed,
+  volume,
+  audio,
+  audioEdit,
   fxEdit,
   templates,
   effects,
@@ -150,6 +194,13 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   int _nextFx = 1;
   int? _fxSel; // the effect bar being edited
   bool _sampleCards = true; // effect cards on the sample picture or my clip
+  final List<_Audio> _music = [];
+  int _nextAu = 1;
+  int? _auSel; // the music bar being edited
+  bool _origOn = true; // the clips' own sound
+  bool _audioBusy = false;
+  bool _audioAgain = false;
+  bool _picking = false;
   bool _lookBusy = false;
   bool _lookAgain = false;
   String _tplCat = 'For You';
@@ -218,6 +269,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _fitFx();
       _sendLook();
     }
+    if (_music.isNotEmpty) {
+      _fitAudio();
+      _sendAudio();
+    }
     try {
       await _ch.invokeMethod('setTimeline', {
         'clips': [for (final _Clip c in _clips) c.toMap()],
@@ -259,6 +314,121 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       if (f.end > tot) f.end = tot;
       if (f.end - f.start < 0.3) f.start = math.max(0.0, f.end - 0.3);
     }
+  }
+
+  // ------------------------------------------------------------ audio
+  Future<void> _sendAudio() async {
+    if (_audioBusy) {
+      _audioAgain = true;
+      return;
+    }
+    _audioBusy = true;
+    try {
+      do {
+        _audioAgain = false;
+        await _ch.invokeMethod('setAudio', {
+          'music': [for (final _Audio a in _music) a.toMap()],
+          'original': _origOn,
+        });
+      } while (_audioAgain && mounted);
+    } catch (_) {
+    } finally {
+      _audioBusy = false;
+    }
+  }
+
+  void _fitAudio() {
+    final double tot = _total;
+    _music.removeWhere((a) => a.start >= tot - 0.1);
+    for (final _Audio a in _music) {
+      if (a.end > tot) a.end = tot;
+      if (a.end - a.start < 0.5) a.start = math.max(0.0, a.end - 0.5);
+    }
+  }
+
+  _Audio? get _selAu {
+    for (final _Audio a in _music) {
+      if (a.uid == _auSel) return a;
+    }
+    return null;
+  }
+
+  /// Pick a song from the phone; it goes on the audio track at the playhead.
+  Future<void> _addMusic() async {
+    if (_picking || _clips.isEmpty) return;
+    _picking = true;
+    try {
+      final Map<dynamic, dynamic>? r =
+          await _ch.invokeMapMethod<dynamic, dynamic>('pickAudio');
+      if (!mounted || r == null) return;
+      final double dur = (r['dur'] as num).toDouble();
+      final double tot = _total;
+      double start = _time.value;
+      if (start > tot - 0.5) start = 0;
+      final _Audio a = _Audio(
+        uid: _nextAu++,
+        path: r['path'] as String,
+        name: r['name'] as String,
+        srcDur: dur,
+        start: start,
+        end: math.min(start + dur, tot),
+      );
+      setState(() {
+        _music.add(a);
+        _auSel = a.uid;
+        _fxSel = null;
+        _sel = null;
+        _panel = _Panel.audioEdit;
+      });
+      _status.value = '';
+      _sendAudio();
+    } catch (e) {
+      _status.value = 'Could not add the song: $e';
+    } finally {
+      _picking = false;
+    }
+  }
+
+  void _moveAu(_Audio a, double dt) {
+    final double len = a.end - a.start;
+    final double ns = (a.start + dt).clamp(0.0, math.max(0.0, _total - len));
+    setState(() {
+      a.start = ns;
+      a.end = ns + len;
+    });
+    _sendAudio();
+  }
+
+  /// Left end: the song keeps its place in time (like CapCut), so the part
+  /// that is cut off is skipped. Right end: where it stops.
+  void _trimAu(_Audio a, {double dStart = 0, double dEnd = 0}) {
+    setState(() {
+      if (dStart != 0) {
+        final double d = dStart
+            .clamp(-math.min(a.from, a.start), a.end - a.start - 0.5)
+            .toDouble();
+        a.start += d;
+        a.from += d;
+      }
+      if (dEnd != 0) {
+        final double lo = a.start + 0.5;
+        final double hi =
+            math.max(lo, math.min(_total, a.start + a.srcDur - a.from));
+        a.end = (a.end + dEnd).clamp(lo, hi);
+      }
+    });
+    _sendAudio();
+  }
+
+  void _deleteAu() {
+    final _Audio? a = _selAu;
+    if (a == null) return;
+    setState(() {
+      _music.remove(a);
+      _auSel = null;
+      _panel = _Panel.audio;
+    });
+    _sendAudio();
   }
 
   Future<void> _addMedia() async {
@@ -506,7 +676,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   void _trimFx(_Fx f, {double dStart = 0, double dEnd = 0}) {
     setState(() {
       if (dStart != 0) f.start = (f.start + dStart).clamp(0.0, f.end - 0.3);
-      if (dEnd != 0) f.end = (f.end + dEnd).clamp(f.start + 0.3, _total);
+      if (dEnd != 0) {
+        f.end = (f.end + dEnd)
+            .clamp(f.start + 0.3, math.max(f.start + 0.3, _total));
+      }
     });
     _sendLook();
   }
@@ -567,6 +740,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         )
           ..template = c.template
           ..speed = c.speed
+          ..vol = c.vol
           ..from = c.from + local * c.speed;
         setState(() {
           c.dur = local;
@@ -597,6 +771,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     )
       ..template = c.template
       ..speed = c.speed
+      ..vol = c.vol
       ..from = c.from;
     setState(() {
       _clips.insert(i + 1, copy);
@@ -639,7 +814,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         final double mb = ((r['bytes'] as num?) ?? 0) / (1024 * 1024);
         _status.value = 'Saved: ${r['uri']}\n'
             '${r['frames']} frames · ${mb.toStringAsFixed(1)} MB · '
-            'made in ${secs.toStringAsFixed(1)} s';
+            'made in ${secs.toStringAsFixed(1)} s'
+            '${r['audio'] == null ? '' : '\n${r['audio']}'}';
       }
     } catch (e) {
       _status.value = 'Export failed: $e';
@@ -679,12 +855,248 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     return lanes;
   }
 
+  List<List<_Audio>> _auLanes() {
+    final List<List<_Audio>> lanes = [];
+    final List<_Audio> sorted = [..._music]
+      ..sort((a, b) => a.start.compareTo(b.start));
+    for (final _Audio a in sorted) {
+      List<_Audio>? home;
+      for (final List<_Audio> l in lanes) {
+        if (l.last.end <= a.start + 0.01) {
+          home = l;
+          break;
+        }
+      }
+      if (home == null) {
+        lanes.add([a]);
+      } else {
+        home.add(a);
+      }
+    }
+    return lanes;
+  }
+
+  /// A green music bar. Tap = select; selected: drag to move, ends to trim.
+  Widget _auBar(_Audio a) {
+    final bool sel = a.uid == _auSel;
+    final double w = math.max(20.0, (a.end - a.start) * _pps);
+    Widget handle(bool left) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragUpdate: (d) => left
+              ? _trimAu(a, dStart: d.delta.dx / _pps)
+              : _trimAu(a, dEnd: d.delta.dx / _pps),
+          child: Container(
+            width: 14,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.horizontal(
+                left: Radius.circular(left ? 5 : 0),
+                right: Radius.circular(left ? 0 : 5),
+              ),
+            ),
+            child: Container(width: 2, height: 10, color: Colors.black54),
+          ),
+        );
+    return Positioned(
+      left: a.start * _pps,
+      top: 2,
+      height: _laneH - 4,
+      width: w,
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _auSel = sel ? null : a.uid;
+          _sel = null;
+          _fxSel = null;
+          _panel = sel ? _Panel.audio : _Panel.audioEdit;
+        }),
+        onHorizontalDragUpdate:
+            sel ? (d) => _moveAu(a, d.delta.dx / _pps) : null,
+        child: Container(
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFF1DB954) : const Color(0xFF17703A),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(
+                color: sel ? Colors.white : Colors.transparent, width: 1.2),
+          ),
+          child: Row(
+            children: [
+              if (sel) handle(true),
+              const SizedBox(width: 4),
+              const Icon(Icons.music_note, size: 11, color: Colors.white),
+              const SizedBox(width: 3),
+              Expanded(
+                child: Text(a.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                    style: const TextStyle(
+                        fontSize: 10, fontWeight: FontWeight.w700)),
+              ),
+              if (sel) handle(false),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _labeledSlider(String label, String value, double v, double min,
+      double max, ValueChanged<double> onChanged) {
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          const SizedBox(width: 16),
+          SizedBox(
+              width: 64, child: Text(label, style: const TextStyle(fontSize: 12))),
+          Expanded(
+            child: Slider(
+                value: v.clamp(min, max), min: min, max: max, onChanged: onChanged),
+          ),
+          SizedBox(
+              width: 46,
+              child: Text(value,
+                  style: const TextStyle(
+                      fontSize: 11.5, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+  }
+
+  /// Audio: add a song, turn the clips' own sound on / off.
+  Widget _audioPanel() {
+    return Column(
+      children: [
+        _panelHeader(_music.isEmpty
+            ? 'Audio'
+            : 'Audio · ${_music.length} song${_music.length == 1 ? '' : 's'}'),
+        SizedBox(
+          height: 70,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            children: [
+              _tool(Icons.library_music_outlined,
+                  _picking ? 'Opening...' : 'Add music', _addMusic),
+              _tool(_origOn ? Icons.volume_up : Icons.volume_off,
+                  _origOn ? 'Original: On' : 'Original: Off', () {
+                setState(() => _origOn = !_origOn);
+                _sendAudio();
+              }, active: !_origOn),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text(
+              'Songs from your phone go on the green track at the playhead · tap a green bar to change it',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 10.5, color: Colors.white54)),
+        ),
+      ],
+    );
+  }
+
+  /// The selected song: volume, fades, length, delete.
+  Widget _audioEditPanel() {
+    final _Audio? a = _selAu;
+    if (a == null) return _audioPanel();
+    return Column(
+      children: [
+        SizedBox(
+          height: 34,
+          child: Row(
+            children: [
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text('${a.name} · ${_fmt(a.start)} - ${_fmt(a.end)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() {
+                  _auSel = null;
+                  _panel = _Panel.audio;
+                }),
+                icon: const Icon(Icons.check),
+              ),
+            ],
+          ),
+        ),
+        _labeledSlider('Volume', '${(a.vol * 100).round()}%', a.vol, 0, 2, (v) {
+          setState(() => a.vol = v);
+          _sendAudio();
+        }),
+        _labeledSlider('Fade in', '${a.fadeIn.toStringAsFixed(1)}s', a.fadeIn, 0, 5,
+            (v) {
+          setState(() => a.fadeIn = v);
+          _sendAudio();
+        }),
+        _labeledSlider(
+            'Fade out', '${a.fadeOut.toStringAsFixed(1)}s', a.fadeOut, 0, 5, (v) {
+          setState(() => a.fadeOut = v);
+          _sendAudio();
+        }),
+        SizedBox(
+          height: 70,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            children: [
+              _tool(Icons.straighten, 'Whole video', () {
+                setState(() {
+                  a.start = 0;
+                  a.end = math.min(_total, a.srcDur - a.from);
+                });
+                _sendAudio();
+              }),
+              _tool(Icons.delete_outline, 'Delete', _deleteAu),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The selected video clip's own sound.
+  Widget _volumePanel() {
+    final _Clip? c = _current;
+    return Column(
+      children: [
+        _panelHeader('Clip sound'),
+        if (c != null)
+          _labeledSlider('Volume', '${(c.vol * 100).round()}%', c.vol, 0, 2, (v) {
+            setState(() => c.vol = v);
+            _sendTimeline();
+          }),
+        if (c != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: TextButton.icon(
+              onPressed: () {
+                setState(() => c.vol = c.vol == 0 ? 1 : 0);
+                _sendTimeline();
+              },
+              icon: Icon(c.vol == 0 ? Icons.volume_up : Icons.volume_off),
+              label: Text(c.vol == 0 ? 'Turn sound on' : 'Mute this clip'),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _timeline() {
     return LayoutBuilder(builder: (context, box) {
       final double half = box.maxWidth / 2;
       final List<List<_Fx>> lanes = _fxLanes();
+      final List<List<_Audio>> auLanes = _auLanes();
       final double stripW = _clips.fold(0.0, (s, c) => s + _widthOf(c));
-      final double h = 66 + (lanes.isEmpty ? 0 : lanes.length * _laneH + 4);
+      final double h = 66 +
+          (lanes.isEmpty ? 0 : lanes.length * _laneH + 4) +
+          (auLanes.isEmpty ? 0 : auLanes.length * _laneH + 4);
       return SizedBox(
         height: h,
         child: Stack(
@@ -727,6 +1139,16 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         child: Stack(
                           clipBehavior: Clip.none,
                           children: [for (final _Fx f in lane) _fxBar(f)],
+                        ),
+                      ),
+                    if (auLanes.isNotEmpty) const SizedBox(height: 4),
+                    for (final List<_Audio> lane in auLanes)
+                      SizedBox(
+                        height: _laneH,
+                        width: math.max(stripW, 1.0),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [for (final _Audio a in lane) _auBar(a)],
                         ),
                       ),
                   ],
@@ -779,6 +1201,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         onTap: () => setState(() {
           _fxSel = sel ? null : f.uid;
           _sel = null;
+          _auSel = null;
           _panel = sel ? _Panel.none : _Panel.fxEdit;
         }),
         onHorizontalDragUpdate:
@@ -850,6 +1273,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         setState(() {
           _sel = sel ? null : c.id;
           _fxSel = null;
+          _auSel = null;
           _panel = sel ? _Panel.none : _Panel.edit;
         });
         if (!sel) _loadThumbs();
@@ -929,6 +1353,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         padding: const EdgeInsets.symmetric(horizontal: 6),
         children: [
           _tool(Icons.content_cut, 'Edit', () => _open(_Panel.edit)),
+          _tool(Icons.music_note, 'Audio', () => _open(_Panel.audio),
+              active: _music.isNotEmpty || !_origOn),
           _tool(Icons.auto_awesome_motion, 'Templates',
               () => _open(_Panel.templates)),
           _tool(Icons.auto_awesome, 'Effects', () => _open(_Panel.effects),
@@ -1081,6 +1507,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               if (c != null)
                 _tool(Icons.timer_outlined, c.video ? 'Trim' : 'Duration',
                     () => setState(() => _panel = _Panel.duration)),
+              if (c != null && c.video)
+                _tool(c.vol == 0 ? Icons.volume_off : Icons.volume_up, 'Volume',
+                    () => setState(() => _panel = _Panel.volume)),
               if (c != null && c.video)
                 _tool(Icons.speed, 'Speed',
                     () => setState(() => _panel = _Panel.speed)),
@@ -1637,6 +2066,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _Panel.duration => _durationPanel(),
       _Panel.speed => _speedPanel(),
       _Panel.fxEdit => _fxEditPanel(),
+      _Panel.volume => _volumePanel(),
+      _Panel.audio => _audioPanel(),
+      _Panel.audioEdit => _audioEditPanel(),
       _Panel.templates => _templatesPanel(),
       _Panel.effects => _effectsPanel(),
       _Panel.filters => _filtersPanel(),

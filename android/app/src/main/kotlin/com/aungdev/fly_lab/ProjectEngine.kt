@@ -83,7 +83,7 @@ class Media(
 
 /** One clip on the timeline. from = where in the source the clip starts (split / trim). */
 class TClip(val id: Int, val media: Media, val dur: Float, val template: String,
-            val from: Float = 0f, val speed: Float = 1f)
+            val from: Float = 0f, val speed: Float = 1f, val vol: Float = 1f)
 
 /**
  * One effect on the EFFECTS TRACK (18 Nov 2026): on screen from start to end
@@ -485,6 +485,11 @@ class ProjectEngine(
     private var playWall = 0L
     private var playT0 = 0f
 
+    // Audio (E2): music bars + the clips' own sound on / off.
+    @Volatile private var music: List<AClip> = emptyList()
+    @Volatile private var original = true
+    private val musicPreview = MusicPreview()
+
     // Export.
     @Volatile private var progress = 0.0
     @Volatile private var exporting = false
@@ -502,7 +507,8 @@ class ProjectEngine(
                         (mp["dur"] as Number).toFloat().coerceAtLeast(0.2f),
                         (mp["template"] as? String) ?: "plain",
                         ((mp["from"] as? Number)?.toFloat() ?: 0f).coerceAtLeast(0f),
-                        ((mp["speed"] as? Number)?.toFloat() ?: 1f).coerceIn(0.25f, 4f))
+                        ((mp["speed"] as? Number)?.toFloat() ?: 1f).coerceIn(0.25f, 4f),
+                        ((mp["vol"] as? Number)?.toFloat() ?: 1f).coerceIn(0f, 2f))
                 }
                 val tot = total()
                 if (curT > tot) curT = maxOf(0f, tot - 0.01f)
@@ -539,6 +545,12 @@ class ProjectEngine(
                 }
                 result.success(null)
             }
+            "setAudio" -> {
+                music = AClip.parse(call.argument<List<Map<String, Any>>>("music"))
+                original = call.argument<Boolean>("original") ?: original
+                result.success(null)
+            }
+            "pickAudio" -> AudioPick.pick(activity, result)
             "pause" -> {
                 gl?.post { playing = false }
                 result.success(null)
@@ -713,6 +725,7 @@ class ProjectEngine(
                     }
                     e.swap()
                 }
+                musicPreview.sync(music, curT, playing)
             } catch (ex: Throwable) {
                 Log.e(tag, "frame", ex)
             }
@@ -732,6 +745,8 @@ class ProjectEngine(
             return FrameSrc(r.photoTexture(m), false, m.aspect, null)
         }
         val s = (c.from + lt * c.speed).coerceIn(0f, maxOf(0f, m.srcDur - 0.05f))
+        val v = if (original) c.vol.coerceAtMost(1f) else 0f
+        try { p.mp.setVolume(v, v) } catch (_: Throwable) {}
         if (playing) {
             if (!p.mp.isPlaying) {
                 p.seek(s)
@@ -757,6 +772,7 @@ class ProjectEngine(
         h?.post {
             for (p in players.values) p.release()
             players.clear()
+            musicPreview.release()
             try { renderer?.release() } catch (_: Throwable) {}
             try { egl?.release() } catch (_: Throwable) {}
             egl = null
@@ -904,17 +920,31 @@ class ProjectEngine(
         val lk = look
         val w = outW
         val h = outH
+        val mus = music
+        val orig = original
         Thread {
             val started = SystemClock.uptimeMillis()
             val out = File(activity.cacheDir, "flyproject_${System.currentTimeMillis()}.mp4")
             try {
-                val frames = encode(tl, lk, w, h, out)
+                // Sound first (it is small), then the video frames.
+                AudioMix.report = ""
+                val audio = try {
+                    val mix = AudioMix.mix(tl, mus, orig, total(tl))
+                    progress = 0.03
+                    mix?.let { AudioMix.encode(it) }
+                } catch (e: Throwable) {
+                    Log.e(tag, "audio", e)
+                    AudioMix.report += " | audio error: ${e.javaClass.simpleName} ${e.message ?: ""}".take(100)
+                    null
+                }
+                val frames = encode(tl, lk, w, h, out, audio)
                 val uri = LabImages.saveVideoToGallery(activity, out)
                 val ms = SystemClock.uptimeMillis() - started
                 val bytes = out.length()
                 out.delete()
                 main.post {
-                    result.success(mapOf("uri" to uri, "ms" to ms, "bytes" to bytes, "frames" to frames))
+                    result.success(mapOf("uri" to uri, "ms" to ms, "bytes" to bytes, "frames" to frames,
+                        "audio" to (if (audio != null) "Sound: " else "NO sound: ") + AudioMix.report))
                 }
             } catch (e: Throwable) {
                 Log.e(tag, "export", e)
@@ -926,7 +956,7 @@ class ProjectEngine(
         }.start()
     }
 
-    private fun encode(tl: List<TClip>, lk: PLook, w: Int, h: Int, out: File): Int {
+    private fun encode(tl: List<TClip>, lk: PLook, w: Int, h: Int, out: File, audio: EncodedAudio?): Int {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -957,8 +987,13 @@ class ProjectEngine(
                 }
                 if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     track = muxer.addTrack(codec.outputFormat)
+                    val aTrack = if (audio != null) muxer.addTrack(audio.format) else -1
                     muxer.start()
                     muxing = true
+                    if (audio != null) {
+                        AudioMix.writeAll(muxer, aTrack, audio)
+                        AudioMix.report += " | muxed"
+                    }
                     continue
                 }
                 if (idx < 0) continue

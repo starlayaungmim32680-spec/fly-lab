@@ -248,6 +248,26 @@ Build (arm64 only, ~20-150 s):
 - setLook sends fx: [{id, start, end, x, y, r, placed}] (old "effects"
   list still read as whole-length bars).
 
+## Project editor E2 - Audio (19 Nov 2026): WORKS (Ko tested)
+- Toolbar "Audio": Add music (the phone's file picker, audio/*, copied into
+  cache/music), Original: On / Off (the clips' own sound). Edit -> Volume
+  for a video clip (0 - 200%, mute).
+- Songs are GREEN bars on an audio track under the effect bars (lanes).
+  Tap = select: drag to move, left end trims the start of the song (it
+  keeps its place in time), right end = where it stops. Panel: Volume
+  0 - 200%, Fade in / out 0 - 5 s, Whole video, Delete.
+- Native: ProjectAudio.kt. AudioPick (ACTION_OPEN_DOCUMENT, result via
+  MainActivity.onActivityResult), MusicPreview (a MediaPlayer per bar, kept
+  in step by the render loop, gain with fades; preview max 100%), AudioMix
+  (decode clip sound + songs with MediaExtractor/MediaCodec, mix at
+  44.1 kHz stereo, soft clip, AAC 160 kbps). encode() muxes the AAC track
+  next to the video. Channel: setAudio {music: [...], original}, pickAudio.
+- Speed != 1: the clip's sound is resampled (pitch changes) - no
+  time-stretch yet.
+- Under Export the app shows what happened to the sound, e.g. "Sound:
+  44kHz 2ch s16 9.0s | AAC 392 blocks | muxed" (or "NO sound: ...").
+  First test seemed silent only because a phone call was on.
+
 ## CapCut-style editor - plan (Ko approved 17 Nov 2026: "the free way")
 Ko showed CapCut's toolbar (Edit, Audio, Text, Effects, Overlay, Captions,
 Filters, Adjust, Stickers, Generate media, AI avatar, Transcript, Aspect
