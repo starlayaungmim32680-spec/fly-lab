@@ -12,8 +12,9 @@
 // Effects, Filters, Adjust, Ratio, Background, Add). A tool opens its
 // panel in place of the toolbar; the tick closes it.
 // E1b (done): split at playhead, duplicate, trim (video), duration (photo),
-// move left / right, delete. Coming next: speed + drag reorder, E2 Audio,
-// E3 Text, E4 Stickers + Overlay, E5 Transitions.
+// move left / right, delete. E1c: speed (video 0.5x - 3x), long-press a
+// clip and drag to reorder. Next: E2 Audio, E3 Text, E4 Stickers +
+// Overlay, E5 Transitions.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -42,8 +43,15 @@ class _Clip {
   /// Where in the source this clip starts (0 unless split or trimmed).
   double from = 0;
 
-  /// How long the source can still give us from [from] on.
-  double get maxDur => video ? (srcDur - from).clamp(0.5, 600.0) : 10.0;
+  /// Playback speed (video only): 2.0 = twice as fast, so the same source
+  /// footage takes half the timeline time.
+  double speed = 1;
+
+  /// The longest this clip can be on the timeline: the source left from
+  /// [from] on, played at [speed].
+  double get maxDur => video
+      ? ((srcDur - from) / speed).clamp(0.5, 600.0).toDouble()
+      : 10.0;
 
   Map<String, Object> toMap() => {
         'id': id,
@@ -51,6 +59,7 @@ class _Clip {
         'dur': dur,
         'template': template,
         'from': from,
+        'speed': speed,
       };
 }
 
@@ -58,6 +67,7 @@ enum _Panel {
   none,
   edit,
   duration,
+  speed,
   templates,
   effects,
   filters,
@@ -436,7 +446,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           thumb: c.thumb,
         )
           ..template = c.template
-          ..from = c.from + local;
+          ..speed = c.speed
+          ..from = c.from + local * c.speed;
         setState(() {
           c.dur = local;
           _clips.insert(i + 1, right);
@@ -465,6 +476,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       thumb: c.thumb,
     )
       ..template = c.template
+      ..speed = c.speed
       ..from = c.from;
     setState(() {
       _clips.insert(i + 1, copy);
@@ -568,6 +580,37 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     });
   }
 
+  double _widthOf(_Clip c) => (c.dur * _pps).clamp(24.0, 4000.0) + 2;
+
+  // Long-press a clip, then drag it left / right to change its place.
+  double _dragBase = 0;
+
+  void _dragMove(_Clip c, double dx) {
+    final int i = _clips.indexOf(c);
+    if (i < 0) return;
+    final double rel = dx - _dragBase;
+    int j = i;
+    if (rel > 0 && i < _clips.length - 1) {
+      final double nw = _widthOf(_clips[i + 1]);
+      if (rel > nw / 2) {
+        j = i + 1;
+        _dragBase += nw;
+      }
+    } else if (rel < 0 && i > 0) {
+      final double pw = _widthOf(_clips[i - 1]);
+      if (rel < -pw / 2) {
+        j = i - 1;
+        _dragBase -= pw;
+      }
+    }
+    if (j != i) {
+      setState(() {
+        _clips.removeAt(i);
+        _clips.insert(j, c);
+      });
+    }
+  }
+
   Widget _clipBox(_Clip c) {
     final bool sel = _sel == c.id;
     return GestureDetector(
@@ -578,6 +621,12 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         });
         if (!sel) _loadThumbs();
       },
+      onLongPressStart: (_) {
+        _dragBase = 0;
+        setState(() => _sel = c.id);
+      },
+      onLongPressMoveUpdate: (d) => _dragMove(c, d.offsetFromOrigin.dx),
+      onLongPressEnd: (_) => _sendTimeline(),
       child: Container(
         width: (c.dur * _pps).clamp(24.0, 4000.0),
         margin: const EdgeInsets.only(right: 2),
@@ -798,6 +847,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               if (c != null)
                 _tool(Icons.timer_outlined, c.video ? 'Trim' : 'Duration',
                     () => setState(() => _panel = _Panel.duration)),
+              if (c != null && c.video)
+                _tool(Icons.speed, 'Speed',
+                    () => setState(() => _panel = _Panel.speed)),
               _tool(Icons.content_cut, 'Split at playhead', _splitClip),
               _tool(Icons.copy_outlined, 'Duplicate', _duplicateClip),
               _tool(Icons.auto_awesome_motion, 'Template',
@@ -808,6 +860,45 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  void _setSpeed(_Clip c, double v) {
+    // Keep the same footage; only the timeline length changes.
+    final double span = c.dur * c.speed;
+    setState(() {
+      c.speed = v;
+      c.dur = (span / v).clamp(0.5, c.maxDur).toDouble();
+    });
+    _sendTimeline();
+  }
+
+  Widget _speedPanel() {
+    final _Clip? c = _current;
+    const List<double> steps = [0.5, 1, 1.5, 2, 3];
+    return Column(
+      children: [
+        _panelHeader('Speed'),
+        if (c != null)
+          SizedBox(
+            height: 70,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              children: [
+                for (final double v in steps)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ChoiceChip(
+                      label: Text('${v % 1 == 0 ? v.toInt() : v}x'),
+                      selected: c.speed == v,
+                      onSelected: (_) => _setSpeed(c, v),
+                    ),
+                  ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -1188,6 +1279,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _Panel.none => _mainToolbar(),
       _Panel.edit => _editPanel(),
       _Panel.duration => _durationPanel(),
+      _Panel.speed => _speedPanel(),
       _Panel.templates => _templatesPanel(),
       _Panel.effects => _effectsPanel(),
       _Panel.filters => _filtersPanel(),

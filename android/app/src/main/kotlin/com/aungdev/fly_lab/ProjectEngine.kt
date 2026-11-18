@@ -22,7 +22,7 @@ package com.aungdev.fly_lab
 //
 // Channel "flylab/project":
 //   addMedia {items: [{path, video}]}  -> [{media, video, dur, aspect, thumb}]
-//   setTimeline {clips: [{id, media, dur, template, from}]}  (from = source start, E1b)
+//   setTimeline {clips: [{id, media, dur, template, from, speed}]}  (from = source start, E1b; speed E1c)
 //   setLook {adj[8], effects[], fit, bgMode, bgColor[3]}
 //   setRatio {ratio: "9:16" | "1:1" | "4:5" | "16:9"} -> {textureId, width, height}
 //   preview -> {textureId, width, height}
@@ -81,7 +81,8 @@ class Media(
 )
 
 /** One clip on the timeline. from = where in the source the clip starts (split / trim). */
-class TClip(val id: Int, val media: Media, val dur: Float, val template: String, val from: Float = 0f)
+class TClip(val id: Int, val media: Media, val dur: Float, val template: String,
+            val from: Float = 0f, val speed: Float = 1f)
 
 /** The project's look. */
 class PLook(
@@ -289,6 +290,7 @@ class VPlayer(val m: Media, handler: Handler) {
     @Volatile private var fresh = false
     var hasFrame = false
     var lastSeek = -1f
+    var speed = 1f
     val mat = FloatArray(16)
 
     init {
@@ -302,6 +304,15 @@ class VPlayer(val m: Media, handler: Handler) {
     fun seek(s: Float) {
         mp.seekTo((s * 1000).toLong(), MediaPlayer.SEEK_CLOSEST)
         lastSeek = s
+    }
+
+    /** Start playing at speed v (E1c). Setting the params also starts it. */
+    fun startAt(v: Float) {
+        try {
+            mp.playbackParams = mp.playbackParams.setSpeed(v)
+            speed = v
+        } catch (_: Throwable) {}
+        if (!mp.isPlaying) mp.start()
     }
 
     /** Call on the GL thread: takes the newest frame, if there is one. */
@@ -467,7 +478,8 @@ class ProjectEngine(
                     TClip((mp["id"] as Number).toInt(), m,
                         (mp["dur"] as Number).toFloat().coerceAtLeast(0.2f),
                         (mp["template"] as? String) ?: "plain",
-                        ((mp["from"] as? Number)?.toFloat() ?: 0f).coerceAtLeast(0f))
+                        ((mp["from"] as? Number)?.toFloat() ?: 0f).coerceAtLeast(0f),
+                        ((mp["speed"] as? Number)?.toFloat() ?: 1f).coerceIn(0.25f, 4f))
                 }
                 val tot = total()
                 if (curT > tot) curT = maxOf(0f, tot - 0.01f)
@@ -696,13 +708,14 @@ class ProjectEngine(
             Log.e(tag, "player", e)
             return FrameSrc(r.photoTexture(m), false, m.aspect, null)
         }
-        val s = (c.from + lt).coerceIn(0f, maxOf(0f, m.srcDur - 0.05f))
+        val s = (c.from + lt * c.speed).coerceIn(0f, maxOf(0f, m.srcDur - 0.05f))
         if (playing) {
             if (!p.mp.isPlaying) {
                 p.seek(s)
-                p.mp.start()
-            } else if (abs(p.mp.currentPosition / 1000f - s) > 0.35f) {
-                p.seek(s)
+                p.startAt(c.speed)
+            } else {
+                if (p.speed != c.speed) p.startAt(c.speed)
+                if (abs(p.mp.currentPosition / 1000f - s) > 0.35f * maxOf(1f, c.speed)) p.seek(s)
             }
         } else {
             if (p.mp.isPlaying) p.mp.pause()
@@ -899,7 +912,7 @@ class ProjectEngine(
                         decClip = c.id
                     }
                     val d = dec!!
-                    d.frameAt((c.from + lt).coerceAtMost(maxOf(0f, m.srcDur - 0.02f)))
+                    d.frameAt((c.from + lt * c.speed).coerceAtMost(maxOf(0f, m.srcDur - 0.02f)))
                     if (d.hasFrame) FrameSrc(d.tex, true, m.aspect, d.mat)
                     else FrameSrc(r.photoTexture(m), false, m.aspect, null)
                 } else FrameSrc(r.photoTexture(m), false, m.aspect, null)

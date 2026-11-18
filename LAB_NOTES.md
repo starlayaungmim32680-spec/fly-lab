@@ -161,7 +161,7 @@ Build (arm64 only, ~20-150 s):
   video looks like the preview (Retro Film checked). Small fix for later:
   Retro Film's dust spots are hard black squares - make them round / soft.
 
-## Project editor E1a - project + timeline (17 Nov 2026 night, testing)
+## Project editor E1a - project + timeline (17 Nov 2026 night): WORKS (Ko tested, export 1:30 in ~30 s)
 - Ko: "the free way, as good as possible" -> everything on the phone, no
   server, no paid API. Captions later with an on-device open-source
   Whisper model; Generate media / AI avatar not planned.
@@ -186,6 +186,28 @@ Build (arm64 only, ~20-150 s):
   Flutter stubs); compose + template chain rendered on the PC emulator.
   Dart NOT analysed here (no Flutter) - flutter analyze on Ko's PC.
 - E1b next: split, trim, speed, duplicate, drag to reorder.
+
+## Project editor E1b - split / duplicate / trim (18 Nov 2026): WORKS (Ko tested, FlyLab build 18 Nov)
+- Clip has a SOURCE START `from` (0 unless split or trimmed). Native
+  TClip(from): preview and export read the source at from + clip time.
+- Edit panel: Split at playhead (cuts the clip under the playhead in two,
+  refused within 0.3 s of an edge), Duplicate (copy right after), Trim for
+  video (up to source length - from) / Duration for photo (0.5 - 10 s),
+  Move left / right, Delete.
+- Not yet: speed, drag to reorder on the strip, trim from the start edge.
+- Clip label (6.8 s) was out of step with the real clip length; the
+  timeline total now matches the exported length (Ko checked).
+- Commit: E1a + E1b (project_editor.dart, ProjectEngine.kt, LAB_NOTES.md).
+
+## Project editor E1c - speed + drag to reorder (18 Nov 2026): WORKS (Ko tested)
+- Clip SPEED (video only): Edit -> Speed, 0.5x / 1x / 1.5x / 2x / 3x. Same
+  footage, timeline length = footage / speed. Native TClip(speed): source
+  time = from + clip time * speed (preview and export). Preview player uses
+  MediaPlayer playbackParams.setSpeed (VPlayer.startAt).
+- Split / Duplicate keep the speed; split maps the source offset through it.
+- Long-press a clip on the strip, drag left / right to change its place
+  (swaps when dragged past half of the neighbour); timeline sent on release.
+- Next: E2 Audio (music from the phone, volume, fade, original sound).
 
 ## CapCut-style editor - plan (Ko approved 17 Nov 2026: "the free way")
 Ko showed CapCut's toolbar (Edit, Audio, Text, Effects, Overlay, Captions,
