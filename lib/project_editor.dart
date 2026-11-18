@@ -11,11 +11,16 @@
 // under a fixed white playhead, and a bottom toolbar (Edit, Templates,
 // Effects, Filters, Adjust, Ratio, Background, Add). A tool opens its
 // panel in place of the toolbar; the tick closes it.
+// Effects (18 Nov 2026): an EFFECTS TRACK like CapCut - each effect is a
+// bar under the clips (tap a card = a 3 s bar at the playhead; drag the bar
+// / its ends), and can be placed on the video (a circle: drag + pinch).
+// Effect cards show the built-in Sample picture or My clip.
 // E1b (done): split at playhead, duplicate, trim (video), duration (photo),
 // move left / right, delete. E1c: speed (video 0.5x - 3x), long-press a
 // clip and drag to reorder. Next: E2 Audio, E3 Text, E4 Stickers +
 // Overlay, E5 Transitions.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -63,11 +68,38 @@ class _Clip {
       };
 }
 
+/// One effect on the EFFECTS TRACK (like CapCut): on screen from [start] to
+/// [end] (project seconds). [placed] = only inside a circle the user drags
+/// on the video ([x], [y] 0..1 from the top-left, radius [r] in frame
+/// heights); otherwise the whole frame.
+class _Fx {
+  _Fx({required this.uid, required this.id, required this.start, required this.end});
+  final int uid;
+  String id;
+  double start;
+  double end;
+  double x = 0.5;
+  double y = 0.5;
+  double r = 0.3;
+  bool placed = false;
+
+  Map<String, Object> toMap() => {
+        'id': id,
+        'start': start,
+        'end': end,
+        'x': x,
+        'y': y,
+        'r': r,
+        'placed': placed,
+      };
+}
+
 enum _Panel {
   none,
   edit,
   duration,
   speed,
+  fxEdit,
   templates,
   effects,
   filters,
@@ -114,9 +146,14 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   String _ratio = '9:16';
   bool _fit = false;
   int _bg = 0; // index in _backgrounds
-  List<String> _effects = const [];
+  final List<_Fx> _fx = [];
+  int _nextFx = 1;
+  int? _fxSel; // the effect bar being edited
+  bool _sampleCards = true; // effect cards on the sample picture or my clip
+  bool _lookBusy = false;
+  bool _lookAgain = false;
   String _tplCat = 'For You';
-  String _fxCat = 'Sky';
+  String _fxCat = 'Trending';
   final Map<int, Map<String, Uint8List>> _thumbs = {};
 
   // Look sliders: brightness, contrast, saturation, warmth, vignette,
@@ -177,6 +214,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   }
 
   Future<void> _sendTimeline() async {
+    if (_fx.isNotEmpty) {
+      _fitFx();
+      _sendLook();
+    }
     try {
       await _ch.invokeMethod('setTimeline', {
         'clips': [for (final _Clip c in _clips) c.toMap()],
@@ -184,19 +225,40 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     } catch (_) {}
   }
 
+  /// Sends the look; calls that come while one is on the way are merged,
+  /// so dragging an effect on the video stays smooth.
   Future<void> _sendLook() async {
-    final Color? bg = _backgrounds[_bg].$2;
+    if (_lookBusy) {
+      _lookAgain = true;
+      return;
+    }
+    _lookBusy = true;
     try {
-      await _ch.invokeMethod('setLook', {
-        'adj': _adj.value,
-        'effects': _effects,
-        'fit': _fit,
-        'bgMode': bg == null ? 0 : 1,
-        'bgColor': bg == null
-            ? [0.0, 0.0, 0.0]
-            : [bg.r, bg.g, bg.b],
-      });
-    } catch (_) {}
+      do {
+        _lookAgain = false;
+        final Color? bg = _backgrounds[_bg].$2;
+        await _ch.invokeMethod('setLook', {
+          'adj': _adj.value,
+          'fx': [for (final _Fx f in _fx) f.toMap()],
+          'fit': _fit,
+          'bgMode': bg == null ? 0 : 1,
+          'bgColor': bg == null ? [0.0, 0.0, 0.0] : [bg.r, bg.g, bg.b],
+        });
+      } while (_lookAgain && mounted);
+    } catch (_) {
+    } finally {
+      _lookBusy = false;
+    }
+  }
+
+  /// Keep every effect bar inside the project after the clips change.
+  void _fitFx() {
+    final double tot = _total;
+    _fx.removeWhere((f) => f.start >= tot - 0.1);
+    for (final _Fx f in _fx) {
+      if (f.end > tot) f.end = tot;
+      if (f.end - f.start < 0.3) f.start = math.max(0.0, f.end - 0.3);
+    }
   }
 
   Future<void> _addMedia() async {
@@ -349,31 +411,36 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         _sel == null) {
       _sel = _current?.id;
     }
-    if (p == _Panel.templates || p == _Panel.effects) _loadThumbs();
+    if (p == _Panel.effects) _fxSel = null;
+    if (p == _Panel.templates) _loadThumbs();
+    if (p == _Panel.effects) _loadThumbs(sample: _sampleCards);
     setState(() => _panel = p);
   }
 
-  Future<void> _loadThumbs() async {
+  static const int _sampleKey = -1; // the engine's built-in sample picture
+
+  Future<void> _loadThumbs({bool sample = false}) async {
     final _Clip? c = _current ?? (_clips.isEmpty ? null : _clips.first);
-    if (c == null || _thumbs.containsKey(c.media)) return;
-    _thumbs[c.media] = const {};
+    final int key = sample || c == null ? _sampleKey : c.media;
+    if (_thumbs.containsKey(key)) return;
+    _thumbs[key] = const {};
     try {
       final Map<dynamic, dynamic>? r = await _ch
-          .invokeMapMethod<dynamic, dynamic>('thumbs', {'media': c.media});
+          .invokeMapMethod<dynamic, dynamic>('thumbs', {'media': key});
       if (!mounted || r == null) return;
-      setState(() => _thumbs[c.media] = {
+      setState(() => _thumbs[key] = {
             for (final MapEntry<dynamic, dynamic> e in r.entries)
               e.key as String: e.value as Uint8List,
           });
     } catch (_) {
-      _thumbs.remove(c.media);
+      _thumbs.remove(key);
     }
   }
 
-  Uint8List? _thumbFor(String id) {
+  Uint8List? _thumbFor(String id, {bool sample = false}) {
     final _Clip? c = _current ?? (_clips.isEmpty ? null : _clips.first);
-    if (c == null) return null;
-    return _thumbs[c.media]?[id];
+    final int key = sample || c == null ? _sampleKey : c.media;
+    return _thumbs[key]?[id];
   }
 
   void _setTemplate(String id, {bool all = false}) {
@@ -389,16 +456,69 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     _sendTimeline();
   }
 
-  void _toggleEffect(String id) {
-    if (_effects.contains(id)) {
-      setState(() => _effects = [..._effects]..remove(id));
-    } else if (_effects.length >= flyMaxEffects) {
-      _status.value = 'Up to $flyMaxEffects effects - remove one first';
-      return;
-    } else {
-      setState(() => _effects = [..._effects, id]);
+  _Fx? get _selFx {
+    for (final _Fx f in _fx) {
+      if (f.uid == _fxSel) return f;
     }
-    _status.value = '';
+    return null;
+  }
+
+  /// Card tap: replace the selected effect, or add a new bar at the playhead
+  /// (3 s, like CapCut). The user then drags the bar to where it should be.
+  void _pickEffect(String id) {
+    if (_clips.isEmpty) return;
+    final _Fx? sel = _selFx;
+    if (sel != null) {
+      setState(() => sel.id = id);
+      _sendLook();
+      return;
+    }
+    final double tot = _total;
+    double start = _time.value.clamp(0.0, tot);
+    double end = math.min(start + 3, tot);
+    if (end - start < 0.5) {
+      start = math.max(0.0, tot - 3);
+      end = tot;
+    }
+    final _Fx f = _Fx(uid: _nextFx++, id: id, start: start, end: end);
+    final int busy = _fx.where((o) => o.start < end && o.end > start).length;
+    setState(() {
+      _fx.add(f);
+      _fxSel = f.uid;
+      _panel = _Panel.fxEdit;
+    });
+    _status.value = busy >= flyMaxEffects
+        ? 'Only $flyMaxEffects effects show at the same time - move one bar'
+        : '';
+    _sendLook();
+  }
+
+  void _moveFx(_Fx f, double dt) {
+    final double len = f.end - f.start;
+    final double ns = (f.start + dt).clamp(0.0, math.max(0.0, _total - len));
+    setState(() {
+      f.start = ns;
+      f.end = ns + len;
+    });
+    _sendLook();
+  }
+
+  void _trimFx(_Fx f, {double dStart = 0, double dEnd = 0}) {
+    setState(() {
+      if (dStart != 0) f.start = (f.start + dStart).clamp(0.0, f.end - 0.3);
+      if (dEnd != 0) f.end = (f.end + dEnd).clamp(f.start + 0.3, _total);
+    });
+    _sendLook();
+  }
+
+  void _deleteFx() {
+    final _Fx? f = _selFx;
+    if (f == null) return;
+    setState(() {
+      _fx.remove(f);
+      _fxSel = null;
+      _panel = _Panel.none;
+    });
     _sendLook();
   }
 
@@ -536,34 +656,81 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         '${(s % 60).toString().padLeft(2, '0')}';
   }
 
+  static const double _laneH = 24;
+
+  /// Effect bars in lanes: a bar goes in the first lane where it fits.
+  List<List<_Fx>> _fxLanes() {
+    final List<List<_Fx>> lanes = [];
+    final List<_Fx> sorted = [..._fx]..sort((a, b) => a.start.compareTo(b.start));
+    for (final _Fx f in sorted) {
+      List<_Fx>? home;
+      for (final List<_Fx> l in lanes) {
+        if (l.last.end <= f.start + 0.01) {
+          home = l;
+          break;
+        }
+      }
+      if (home == null) {
+        lanes.add([f]);
+      } else {
+        home.add(f);
+      }
+    }
+    return lanes;
+  }
+
   Widget _timeline() {
     return LayoutBuilder(builder: (context, box) {
       final double half = box.maxWidth / 2;
+      final List<List<_Fx>> lanes = _fxLanes();
+      final double stripW = _clips.fold(0.0, (s, c) => s + _widthOf(c));
+      final double h = 66 + (lanes.isEmpty ? 0 : lanes.length * _laneH + 4);
       return SizedBox(
-        height: 66,
+        height: h,
         child: Stack(
           children: [
             NotificationListener<ScrollNotification>(
               onNotification: _onScroll,
-              child: ListView(
+              child: SingleChildScrollView(
                 controller: _sc,
                 scrollDirection: Axis.horizontal,
                 padding: EdgeInsets.fromLTRB(half, 5, half - 60, 5),
-                children: [
-                  for (final _Clip c in _clips) _clipBox(c),
-                  GestureDetector(
-                    onTap: _addMedia,
-                    child: Container(
-                      width: 52,
-                      margin: const EdgeInsets.only(left: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: 56,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final _Clip c in _clips) _clipBox(c),
+                          GestureDetector(
+                            onTap: _addMedia,
+                            child: Container(
+                              width: 52,
+                              margin: const EdgeInsets.only(left: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(Icons.add, color: Colors.black),
+                            ),
+                          ),
+                        ],
                       ),
-                      child: const Icon(Icons.add, color: Colors.black),
                     ),
-                  ),
-                ],
+                    if (lanes.isNotEmpty) const SizedBox(height: 4),
+                    for (final List<_Fx> lane in lanes)
+                      SizedBox(
+                        height: _laneH,
+                        width: math.max(stripW, 1.0),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [for (final _Fx f in lane) _fxBar(f)],
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             Positioned(
@@ -578,6 +745,71 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         ),
       );
     });
+  }
+
+  /// One effect bar. Tap = select; when selected, drag it to move it in
+  /// time and drag its ends to change where it starts / stops.
+  Widget _fxBar(_Fx f) {
+    final bool sel = f.uid == _fxSel;
+    final double w = math.max(20.0, (f.end - f.start) * _pps);
+    Widget handle(bool left) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragUpdate: (d) => left
+              ? _trimFx(f, dStart: d.delta.dx / _pps)
+              : _trimFx(f, dEnd: d.delta.dx / _pps),
+          child: Container(
+            width: 14,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.horizontal(
+                left: Radius.circular(left ? 5 : 0),
+                right: Radius.circular(left ? 0 : 5),
+              ),
+            ),
+            child: Container(width: 2, height: 10, color: Colors.black54),
+          ),
+        );
+    return Positioned(
+      left: f.start * _pps,
+      top: 2,
+      height: _laneH - 4,
+      width: w,
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _fxSel = sel ? null : f.uid;
+          _sel = null;
+          _panel = sel ? _Panel.none : _Panel.fxEdit;
+        }),
+        onHorizontalDragUpdate:
+            sel ? (d) => _moveFx(f, d.delta.dx / _pps) : null,
+        child: Container(
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFF9C4DFF) : const Color(0xFF5B3A8C),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(
+                color: sel ? Colors.white : Colors.transparent, width: 1.2),
+          ),
+          child: Row(
+            children: [
+              if (sel) handle(true),
+              const SizedBox(width: 4),
+              Icon(f.placed ? Icons.my_location : Icons.auto_awesome,
+                  size: 11, color: Colors.white),
+              const SizedBox(width: 3),
+              Expanded(
+                child: Text(flyLabel(f.id),
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                    style: const TextStyle(
+                        fontSize: 10, fontWeight: FontWeight.w700)),
+              ),
+              if (sel) handle(false),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   double _widthOf(_Clip c) => (c.dur * _pps).clamp(24.0, 4000.0) + 2;
@@ -617,6 +849,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       onTap: () {
         setState(() {
           _sel = sel ? null : c.id;
+          _fxSel = null;
           _panel = sel ? _Panel.none : _Panel.edit;
         });
         if (!sel) _loadThumbs();
@@ -699,7 +932,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _tool(Icons.auto_awesome_motion, 'Templates',
               () => _open(_Panel.templates)),
           _tool(Icons.auto_awesome, 'Effects', () => _open(_Panel.effects),
-              active: _effects.isNotEmpty),
+              active: _fx.isNotEmpty),
           _tool(Icons.filter_vintage_outlined, 'Filters',
               () => _open(_Panel.filters)),
           _tool(Icons.tune, 'Adjust', () => _open(_Panel.adjust)),
@@ -759,8 +992,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     );
   }
 
-  Widget _card(FlyItem t, bool sel, VoidCallback onTap, {int badge = 0}) {
-    final Uint8List? img = _thumbFor(t.id);
+  Widget _card(FlyItem t, bool sel, VoidCallback onTap,
+      {int badge = 0, bool sample = false}) {
+    final Uint8List? img = _thumbFor(t.id, sample: sample);
     return GestureDetector(
       onTap: onTap,
       child: Padding(
@@ -988,6 +1222,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   }
 
   Widget _effectsPanel() {
+    final _Fx? sel = _selFx;
     return Column(
       children: [
         SizedBox(
@@ -997,25 +1232,19 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
-                    _effects.isEmpty
-                        ? 'Effects · on every clip (up to $flyMaxEffects)'
-                        : 'Effects · ${_effects.map(flyLabel).join(' + ')}',
+                    sel != null
+                        ? 'Replace · ${flyLabel(sel.id)}'
+                        : 'Effects · tap one to add at the playhead',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontSize: 13.5, fontWeight: FontWeight.w800)),
               ),
-              if (_effects.isNotEmpty)
-                TextButton(
-                  onPressed: () {
-                    setState(() => _effects = const []);
-                    _sendLook();
-                  },
-                  child: const Text('Clear'),
-                ),
+              _cardSource(),
               IconButton(
                 visualDensity: VisualDensity.compact,
-                onPressed: () => setState(() => _panel = _Panel.none),
+                onPressed: () => setState(() =>
+                    _panel = sel != null ? _Panel.fxEdit : _Panel.none),
                 icon: const Icon(Icons.check),
               ),
             ],
@@ -1028,13 +1257,140 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
             children: [
-              for (final FlyItem t in flyEffects.where((e) => e.cat == _fxCat))
-                _card(t, _effects.contains(t.id), () => _toggleEffect(t.id),
-                    badge: _effects.contains(t.id)
-                        ? _effects.indexOf(t.id) + 1
-                        : 0),
+              for (final FlyItem t in flyEffectsIn(_fxCat))
+                _card(t, sel != null && sel.id == t.id,
+                    () => _pickEffect(t.id),
+                    badge: _fx.where((f) => f.id == t.id).length,
+                    sample: _sampleCards),
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  /// "Sample | My clip": what the effect cards are drawn on.
+  Widget _cardSource() {
+    Widget chip(String label, bool sample) {
+      final bool on = _sampleCards == sample;
+      return GestureDetector(
+        onTap: () {
+          setState(() => _sampleCards = sample);
+          _loadThumbs(sample: sample);
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: on ? _brand : null,
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: on ? FontWeight.w800 : FontWeight.w500,
+                  color: on ? Colors.white : Colors.white60)),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.white10,
+      ),
+      child: Row(children: [chip('Sample', true), chip('My clip', false)]),
+    );
+  }
+
+  /// The selected effect bar: replace, place on the video, length, delete.
+  Widget _fxEditPanel() {
+    final _Fx? f = _selFx;
+    if (f == null) return _mainToolbar();
+    return Column(
+      children: [
+        SizedBox(
+          height: 34,
+          child: Row(
+            children: [
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                    '${flyLabel(f.id)} · ${_fmt(f.start)} - ${_fmt(f.end)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() {
+                  _fxSel = null;
+                  _panel = _Panel.none;
+                }),
+                icon: const Icon(Icons.check),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 70,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            children: [
+              _tool(Icons.swap_horiz, 'Replace', () {
+                setState(() => _panel = _Panel.effects);
+                _loadThumbs(sample: _sampleCards);
+              }),
+              _tool(Icons.open_with, f.placed ? 'Full screen' : 'Place on video',
+                  () {
+                setState(() => f.placed = !f.placed);
+                _status.value = f.placed
+                    ? 'Drag the circle on the video · pinch to resize'
+                    : '';
+                _sendLook();
+              }, active: f.placed),
+              _tool(Icons.straighten, 'Whole video', () {
+                setState(() {
+                  f.start = 0;
+                  f.end = _total;
+                });
+                _sendLook();
+              }),
+              _tool(Icons.delete_outline, 'Delete', _deleteFx),
+            ],
+          ),
+        ),
+        if (f.placed)
+          SizedBox(
+            height: 36,
+            child: Row(
+              children: [
+                const SizedBox(width: 16),
+                const SizedBox(
+                    width: 50,
+                    child: Text('Size', style: TextStyle(fontSize: 12))),
+                Expanded(
+                  child: Slider(
+                    value: f.r.clamp(0.08, 0.9),
+                    min: 0.08,
+                    max: 0.9,
+                    onChanged: (v) {
+                      setState(() => f.r = v);
+                      _sendLook();
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text(
+              'Drag the bar on the timeline to move it · drag its ends to make it longer or shorter',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 10.5, color: Colors.white54)),
         ),
       ],
     );
@@ -1280,6 +1636,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _Panel.edit => _editPanel(),
       _Panel.duration => _durationPanel(),
       _Panel.speed => _speedPanel(),
+      _Panel.fxEdit => _fxEditPanel(),
       _Panel.templates => _templatesPanel(),
       _Panel.effects => _effectsPanel(),
       _Panel.filters => _filtersPanel(),
@@ -1287,6 +1644,58 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _Panel.ratio => _ratioPanel(),
       _Panel.background => _backgroundPanel(),
     };
+  }
+
+  double _r0 = 0.3;
+
+  /// The circle on the video for a placed effect: drag to move, pinch to
+  /// resize, tap to jump there.
+  Widget _placer(_Fx f) {
+    return LayoutBuilder(builder: (context, b) {
+      final double cx = f.x * b.maxWidth;
+      final double cy = f.y * b.maxHeight;
+      final double rad = f.r * b.maxHeight;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (d) {
+          setState(() {
+            f.x = (d.localPosition.dx / b.maxWidth).clamp(0.0, 1.0);
+            f.y = (d.localPosition.dy / b.maxHeight).clamp(0.0, 1.0);
+          });
+          _sendLook();
+        },
+        onScaleStart: (_) => _r0 = f.r,
+        onScaleUpdate: (d) {
+          setState(() {
+            f.x = (f.x + d.focalPointDelta.dx / b.maxWidth).clamp(0.0, 1.0);
+            f.y = (f.y + d.focalPointDelta.dy / b.maxHeight).clamp(0.0, 1.0);
+            if (d.pointerCount > 1) f.r = (_r0 * d.scale).clamp(0.08, 0.9);
+          });
+          _sendLook();
+        },
+        child: Stack(
+          children: [
+            Positioned(
+              left: cx - rad,
+              top: cy - rad,
+              width: rad * 2,
+              height: rad * 2,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white70, width: 1.5),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.open_with,
+                      size: 18, color: Colors.white70),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   @override
@@ -1328,7 +1737,15 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         )
                       : AspectRatio(
                           aspectRatio: _texW / _texH,
-                          child: Texture(textureId: tex),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Texture(textureId: tex),
+                              if (_panel == _Panel.fxEdit &&
+                                  (_selFx?.placed ?? false))
+                                _placer(_selFx!),
+                            ],
+                          ),
                         ),
             ),
           ),

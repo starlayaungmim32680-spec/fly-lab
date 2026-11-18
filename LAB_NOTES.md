@@ -209,6 +209,45 @@ Build (arm64 only, ~20-150 s):
   (swaps when dragged past half of the neighbour); timeline sent on release.
 - Next: E2 Audio (music from the phone, volume, fade, original sound).
 
+## Effect pack - 25 new effects x styles (18 Nov 2026): WORKS (Ko tested)
+- Ko: "video effects users want, easy to use" (CapCut Trending screenshots).
+  Own versions and own names - no CapCut names / assets copied.
+- 25 shaders, each in up to 4 STYLES (99 cards; 132 effects in all). Style =
+  id suffix: "fx_flame_frame~2" = Fire Frame, style 2. COMMON has uVar =
+  (style, amount, speed, 0) + helpers pick4 / edgeD / px / rot. Engines
+  compile one program per base id (PhotoTemplates.baseOf), set uVar
+  (PhotoTemplates.varOf); thumbs render PhotoTemplates.allIds.
+- Tabs: Trending (hand-picked, first), Motion (Earthquake, Beat Bounce,
+  Wobble, Flash Beat, Soft Blur, Fade), Glitch (Damaged Tape, Old Film, RGB
+  Split, Sound Wave, Retro Flicker, Color Blink), Frame (Electric, Fire,
+  Glow), Love (Like Bubbles, Floating Hearts); Light + Hex Lights, Sequins,
+  Diamond Lights, Light Sweep, Magic Dust; Nature + Autumn Wind, Desert
+  Haze; Party + Fire Burst.
+- Not done (needs a person cut-out, which Ko dropped): Magic cutout, Cut &
+  Paste, leaves AROUND the person, explosion behind the person.
+- Checked here: all shaders pass glslangValidator; every style rendered on
+  the PC; Kotlin compiled. Photo -> Video screen keeps its old list.
+
+## Effects track - time + place + Sample cards (18 Nov 2026): WORKS (Ko tested 19 Nov)
+- Ko: like CapCut, an effect goes ON the video where the user wants it -
+  WHEN (timeline) and WHERE (on the picture); cards on a sample picture
+  AND on my clip.
+- Each effect is a bar on an effects track under the clips (lanes, so
+  overlapping bars stack). Tap a card = a 3 s bar at the playhead. Tap a
+  bar = select (white handles): drag it to move, drag its ends to trim.
+  Edit panel: Replace, Place on video / Full screen, Whole video, Delete,
+  Size. At most 3 effects show at the same moment.
+- Place on video: a circle on the preview - drag to move, pinch or Size to
+  resize, tap to jump. Shader: uArea (x, y, r, on) in COMMON; finish()
+  mixes the pass input back outside the soft circle, so EVERY effect can
+  be placed without per-shader work.
+- Effect time is local to its bar (uTime = t - start, uDur = bar length),
+  so Fade / Blur In run at the bar's start.
+- Cards: "Sample | My clip". Sample = a sunset picture drawn in
+  ProjectEngine (media id -1) - no photo of a real person in the app.
+- setLook sends fx: [{id, start, end, x, y, r, placed}] (old "effects"
+  list still read as whole-length bars).
+
 ## CapCut-style editor - plan (Ko approved 17 Nov 2026: "the free way")
 Ko showed CapCut's toolbar (Edit, Audio, Text, Effects, Overlay, Captions,
 Filters, Adjust, Stickers, Generate media, AI avatar, Transcript, Aspect

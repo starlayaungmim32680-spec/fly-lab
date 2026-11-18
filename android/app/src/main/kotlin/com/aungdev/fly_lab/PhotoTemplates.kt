@@ -156,6 +156,23 @@ vec3 hueShift(vec3 c, float ang) {
     return toR * y;
 }
 
+// Effect pack (18 Nov 2026): uVar = (style 0..3, amount, speed, 0).
+// A variant id "fx_x~2" is effect fx_x with style 2 (see PhotoTemplates.varOf).
+uniform vec4 uVar;
+// Placed effect (18 Nov 2026): only inside a soft circle at uArea.xy (vUv,
+// y up), radius uArea.z in frame heights; off when uArea.w = 0.
+uniform vec4 uArea;
+vec3 pick4(vec3 a, vec3 b, vec3 c, vec3 d) {
+    float s = uVar.x;
+    return s < 0.5 ? a : (s < 1.5 ? b : (s < 2.5 ? c : d));
+}
+// Distance to the nearest edge of the frame, in frame heights.
+float edgeD() {
+    return min(min(vUv.x, 1.0 - vUv.x) * uOutAspect, min(vUv.y, 1.0 - vUv.y));
+}
+vec3 px(vec2 uv) { return photo(coverUv(uv, 1.0, vec2(0.0))); }
+mat2 rot(float a) { float co = cos(a); float si = sin(a); return mat2(co, -si, si, co); }
+
 // The user's filters: 0 none, 1 vivid, 2 warm, 3 cool, 4 b&w, 5 fade,
 // 6 pink, 7 moody.
 vec3 filterColor(vec3 c, float f) {
@@ -172,6 +189,10 @@ vec3 filterColor(vec3 c, float f) {
 }
 // Every template ends here: filter + the user's sliders + fade.
 vec4 finish(vec3 c) {
+    if (uArea.w > 0.5) {
+        float dd = length((vUv - uArea.xy) * vec2(uOutAspect, 1.0));
+        c = mix(px(vUv), c, smoothstep(uArea.z, uArea.z * 0.55, dd));
+    }
     c = clamp(c, 0.0, 1.0);
     if (uFinal < 0.5) return vec4(c, 1.0);
     c = mix(c, filterColor(c, uAdj2.z), uAdj2.w);
@@ -1902,6 +1923,499 @@ void main() {
 }
 """
 
+
+    // ===================== effect pack (18 Nov 2026) - styles via uVar.x
+    private const val FX_QUAKE = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    float k = pow(abs(sin(t * 1.7)), 8.0) * uVar.y * (0.6 + 0.45 * uVar.x);
+    float fr = floor(t * 24.0);
+    vec2 off = (vec2(hash(vec2(fr, 1.0)), hash(vec2(fr, 2.0))) - 0.5) * 0.05 * k;
+    vec2 tc = coverUv(vUv, 1.0 + 0.08 * k, off);
+    float sp = 0.015 * k;
+    vec3 c = vec3(photo(tc + vec2(sp, 0.0)).r, photo(tc).g, photo(tc - vec2(sp, 0.0)).b);
+    float slice = step(0.8, hash(vec2(floor(vUv.y * 18.0), fr))) * clamp(k, 0.0, 1.0);
+    c = mix(c, photo(tc + vec2(0.04 * slice, 0.0)), slice);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_BOUNCE = COMMON + """
+void main() {
+    float s = uVar.x;
+    float slow = (s > 1.5 && s < 2.5) ? 1.0 : 0.0;
+    float t = uTime * uVar.z * mix(2.0, 0.6, slow);
+    float f = fract(t);
+    float beat = exp(-f * 5.0);
+    if (s > 2.5) beat = max(beat, exp(-abs(f - 0.25) * 18.0) * 0.8);
+    if (slow > 0.5) beat = 0.5 + 0.5 * sin(t * 6.2832);
+    float z = 1.0 + 0.08 * beat * uVar.y;
+    vec3 c = photo(coverUv(vUv, z, vec2(0.0)));
+    if (s > 0.5 && s < 1.5) c += vec3(0.25) * exp(-f * 10.0);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_WOBBLE = COMMON + """
+void main() {
+    float s = uVar.x;
+    float t = uTime * uVar.z;
+    float k = 0.012 * uVar.y;
+    vec2 uv = vUv;
+    if (s > 1.5 && s < 2.5) {
+        vec2 d = uv - 0.5;
+        uv = 0.5 + d * (1.0 + 0.05 * sin(length(d) * 20.0 - t * 6.0) * uVar.y);
+    } else {
+        uv.x += sin(uv.y * 18.0 + t * 4.0) * k;
+        uv.y += sin(uv.x * 14.0 + t * 3.0) * k * 0.6;
+    }
+    vec3 c = px(uv);
+    if (s > 0.5 && s < 1.5) c += vec3(0.3) * exp(-fract(t * 1.5) * 8.0);
+    if (s > 2.5) c = mix(c, c * vec3(0.6, 0.9, 1.15) + vec3(0.0, 0.03, 0.08), 0.7);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_FLASH_BEAT = COMMON + """
+void main() {
+    float t = uTime * uVar.z * 1.5;
+    float f = fract(t);
+    vec3 col = pick4(vec3(0.0), vec3(1.0), vec3(1.0, 0.45, 0.75), spectrum(fract(floor(t) * 0.37)));
+    vec3 c = px(vUv);
+    c = mix(c, col, exp(-f * 9.0) * 0.85 * clamp(uVar.y, 0.0, 1.0));
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_SOFT_BLUR = COMMON + """
+void main() {
+    float s = uVar.x;
+    float r = (s < 0.5 ? 0.004 : 0.009) * uVar.y;
+    if (s > 2.5) r = 0.012 * (1.0 - smoothstep(0.0, 1.6, uTime));
+    vec3 b = vec3(0.0);
+    float w = 0.0;
+    for (int i = -2; i <= 2; i++) {
+        for (int j = -2; j <= 2; j++) {
+            vec2 o = vec2(float(i), float(j));
+            float g = exp(-dot(o, o) * 0.35);
+            b += px(vUv + o * r * vec2(1.0 / uOutAspect, 1.0)) * g;
+            w += g;
+        }
+    }
+    vec3 c = b / w;
+    if (s > 1.5 && s < 2.5) {
+        vec3 o = px(vUv);
+        c = mix(o, max(o, c), 0.6) + c * 0.18;
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_FADE = COMMON + """
+void main() {
+    vec3 col = pick4(vec3(0.0), vec3(1.0), vec3(1.0, 0.8, 0.9), vec3(0.0));
+    float d = max(uVar.z, 0.1);
+    float k = min(smoothstep(0.0, d, uTime), smoothstep(0.0, d, uDur - uTime));
+    gl_FragColor = finish(mix(col, px(vUv), k));
+}
+"""
+
+    private const val FX_TAPE = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    float y = vUv.y;
+    float fr = floor(t * 10.0);
+    float k = uVar.y * ((uVar.x > 0.5 && uVar.x < 1.5) ? 1.8 : 1.0);
+    float band = step(0.9, hash(vec2(floor(y * 30.0), fr)));
+    float tear = (hash(vec2(floor(y * 140.0), fr)) - 0.5) * 0.04 * band * k;
+    vec2 uv = vUv + vec2(tear + sin(y * 40.0 + t * 6.0) * 0.0015 * k, 0.0);
+    float sp = 0.005 * k;
+    vec3 c = vec3(px(uv + vec2(sp, 0.0)).r, px(uv).g, px(uv - vec2(sp, 0.0)).b);
+    float roll = fract(t * 0.2);
+    float line = smoothstep(0.03, 0.0, abs(y - 1.0 + roll));
+    c += line * 0.35 * (hash(vec2(floor(vUv.x * 300.0), fr)) - 0.2);
+    c += (hash(vUv * vec2(400.0, 700.0) + fr) - 0.5) * 0.1 * k;
+    vec3 tint = pick4(vec3(1.0), vec3(1.0), vec3(0.85, 0.95, 1.15), vec3(1.12, 0.9, 1.05));
+    c = mix(c, vec3(luma(c)), 0.15) * tint;
+    c *= 0.95 + 0.05 * sin(y * uRes.y * 1.4);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_VINTAGE = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    float fr = floor(t * 12.0);
+    vec2 weave = (vec2(hash(vec2(fr, 3.0)), hash(vec2(fr, 7.0))) - 0.5) * 0.004;
+    vec3 c = px(vUv + weave);
+    float l = luma(c);
+    vec3 sep = vec3(l) * vec3(1.07, 0.92, 0.72) + vec3(0.05, 0.02, 0.0);
+    vec3 g = pick4(sep, vec3(l), mix(c, vec3(l), 0.45) * 0.9 + vec3(0.06, 0.05, 0.03),
+                   c * vec3(1.1, 0.95, 0.75) + vec3(0.04, 0.02, 0.0));
+    c = mix(c, g, clamp(uVar.y, 0.0, 1.0));
+    c *= 0.92 + 0.08 * hash(vec2(fr, 11.0));
+    float sx = hash(vec2(fr, 13.0));
+    float scr = smoothstep(0.0015, 0.0, abs(vUv.x - sx)) * step(0.6, hash(vec2(fr, 17.0)));
+    c = mix(c, vec3(0.9), scr * 0.5);
+    float sp = step(0.9985, hash(floor(vUv * vec2(260.0, 460.0)) + fr));
+    c = mix(c, vec3(0.05), sp * 0.8);
+    vec2 d = vUv - 0.5;
+    c *= 1.0 - dot(d, d) * 1.4;
+    c += (hash(vUv * vec2(500.0, 900.0) + fr) - 0.5) * 0.08;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_RGB = COMMON + """
+void main() {
+    float s = uVar.x;
+    float t = uTime * uVar.z;
+    float k = 0.008 * uVar.y;
+    vec2 dir = vec2(k, 0.0);
+    if (s > 0.5 && s < 1.5) dir = (vUv - 0.5) * k * 4.0;
+    if (s > 1.5 && s < 2.5) dir = vec2(k * 2.5 * pow(abs(sin(t * 3.0)), 4.0), 0.0);
+    if (s > 2.5) dir = vec2(sin(vUv.y * 12.0 + t * 4.0), cos(vUv.x * 10.0 + t * 3.0)) * k;
+    vec3 c = vec3(px(vUv + dir).r, px(vUv).g, px(vUv - dir).b);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_RAINBOW_WAVE = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    float x = vUv.x;
+    float h = (0.025 + 0.06 * abs(sin(x * 23.0 + t * 7.0) * sin(x * 9.0 - t * 4.0))) * uVar.y;
+    h = max(h, 0.004);
+    vec3 col = pick4(spectrum(fract(x * 1.2 + t * 0.15)),
+                     mix(vec3(1.0, 0.35, 0.7), vec3(0.6, 0.3, 1.0), x),
+                     mix(vec3(0.2, 0.9, 1.0), vec3(0.3, 0.5, 1.0), x),
+                     mix(vec3(1.0, 0.85, 0.4), vec3(1.0, 0.6, 0.2), x));
+    float db = vUv.y;
+    float dt = 1.0 - vUv.y;
+    float m = smoothstep(h, h - 0.006, db) + smoothstep(h, h - 0.006, dt);
+    float glow = exp(-db / h * 1.5) + exp(-dt / h * 1.5);
+    c = mix(c, col, clamp(m, 0.0, 1.0) * 0.85);
+    c += col * glow * 0.25;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_FLICKER = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    float fr = floor(t * 14.0);
+    float fl = hash(vec2(fr, 1.0));
+    vec3 c = px(vUv + vec2(0.0, step(0.93, fl) * 0.01));
+    c *= 0.85 + 0.3 * fl * uVar.y;
+    c *= pick4(vec3(1.0), vec3(1.05, 0.95, 0.85), vec3(0.85, 1.0, 1.1), vec3(1.1, 0.9, 1.05));
+    c *= 0.97 + 0.03 * sin(vUv.y * uRes.y * 2.0);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_BLINK = COMMON + """
+void main() {
+    float t = uTime * uVar.z * 1.2;
+    float on = smoothstep(0.0, 0.08, fract(t)) * smoothstep(0.55, 0.4, fract(t));
+    vec3 col = pick4(vec3(1.0, 0.35, 0.7), vec3(0.3, 0.6, 1.0), vec3(0.7, 0.35, 1.0), vec3(1.0, 0.2, 0.25));
+    vec3 c = px(vUv);
+    vec2 d = vUv - 0.5;
+    float e = smoothstep(0.15, 0.6, length(d * vec2(uOutAspect, 1.0)));
+    c = mix(c, c * 0.6 + col * 0.55, on * (0.35 + 0.45 * e) * uVar.y);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_ELECTRIC_FRAME = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    float d = edgeD();
+    float along = vUv.x * uOutAspect + vUv.y;
+    float n = fbm(vec2(along * 9.0, t * 2.5));
+    float n2 = fbm(vec2(along * 17.0 - t * 4.0, 3.0));
+    float e = 0.025 + 0.02 * (n - 0.5);
+    float line = exp(-abs(d - e) * 260.0) * (0.5 + n2);
+    float glow = exp(-d * 22.0) * (0.35 + 0.3 * n);
+    vec3 col = pick4(vec3(0.3, 1.0, 0.4), vec3(0.3, 0.7, 1.0), vec3(0.75, 0.4, 1.0), vec3(1.0, 0.8, 0.3));
+    c += col * (line * 1.6 + glow) * uVar.y;
+    c += vec3(1.0) * line * 0.4;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_FLAME_FRAME = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    float d = edgeD();
+    float along = vUv.x * uOutAspect + vUv.y * 1.3;
+    float n = fbm(vec2(along * 7.0, d * 14.0 - t * 2.4));
+    float reach = 0.09 * uVar.y;
+    float f = clamp((reach * (0.5 + n) - d) / reach, 0.0, 1.0);
+    vec3 a = pick4(vec3(1.0, 0.35, 0.05), vec3(0.15, 0.4, 1.0), vec3(0.6, 0.2, 1.0), vec3(1.0, 0.25, 0.6));
+    vec3 b = pick4(vec3(1.0, 0.9, 0.4), vec3(0.6, 0.9, 1.0), vec3(0.95, 0.75, 1.0), vec3(1.0, 0.8, 0.9));
+    vec3 fc = mix(a, b, f * f);
+    c = mix(c * (1.0 - 0.4 * smoothstep(0.0, 0.3, f)), fc, smoothstep(0.05, 0.5, f));
+    c += a * exp(-d * 14.0) * 0.25;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_GLOW_FRAME = COMMON + """
+void main() {
+    vec3 c = px(vUv);
+    float d = edgeD();
+    float t = uTime * uVar.z;
+    vec3 col = pick4(vec3(1.0, 0.6, 0.8), vec3(1.0, 0.82, 0.45), vec3(1.0), vec3(0.55, 0.75, 1.0));
+    float g = exp(-d * 9.0) * (0.75 + 0.25 * sin(t * 2.0)) * uVar.y;
+    c = mix(c, col, clamp(g, 0.0, 0.85));
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_LIKES = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    for (int i = 0; i < 12; i++) {
+        float fi = float(i);
+        float sp = 0.08 + 0.06 * hash(vec2(fi, 2.0));
+        float life = fract(hash(vec2(fi, 1.0)) + t * sp);
+        float x = 0.62 + 0.33 * hash(vec2(fi, 3.0)) + 0.03 * sin(t * 2.0 + fi * 1.3);
+        if (uVar.x > 2.5) x = 0.08 + 0.84 * hash(vec2(fi, 3.0));
+        vec2 p = vec2(x, -0.08 + life * 1.15);
+        float r = (0.035 + 0.02 * hash(vec2(fi, 4.0))) * (0.6 + 0.4 * smoothstep(0.0, 0.15, life));
+        vec2 q = aspectD(vUv, p) / r;
+        float circ = smoothstep(1.0, 0.92, length(q));
+        float hrt = smoothstep(-0.05, 0.05, heartD(q * 1.9));
+        vec3 red = vec3(1.0, 0.25, 0.35);
+        vec3 mixc = hash(vec2(fi, 6.0)) > 0.55 ? vec3(0.2, 0.5, 1.0) : red;
+        vec3 bg = pick4(mixc, red, vec3(1.0, 0.45, 0.75), vec3(1.0, 0.75, 0.2));
+        float a = (1.0 - smoothstep(0.8, 1.0, life)) * 0.95;
+        c = mix(c, mix(bg, vec3(1.0), hrt), circ * a);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_OUTLINE_HEARTS = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    vec3 col = pick4(vec3(1.0), vec3(1.0, 0.5, 0.75), vec3(1.0, 0.85, 0.45), vec3(1.0, 0.25, 0.35));
+    for (int i = 0; i < 10; i++) {
+        float fi = float(i);
+        float life = fract(hash(vec2(fi, 1.0)) + t * (0.05 + 0.04 * hash(vec2(fi, 2.0))));
+        vec2 p = vec2(hash(vec2(fi, 3.0)) + 0.05 * sin(t + fi), -0.1 + life * 1.2);
+        float s = 0.035 + 0.035 * hash(vec2(fi, 4.0));
+        vec2 q = aspectD(vUv, p) / s;
+        float hd = heartD(q * 0.8);
+        float ring = smoothstep(0.09, 0.03, abs(hd));
+        float a = sin(life * 3.1416);
+        c = mix(c, col, ring * a * 0.9);
+        c += col * exp(-abs(hd) * 6.0) * 0.08 * a * step(length(q), 3.0);
+    }
+    vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * 18.0;
+    vec2 cell = floor(g);
+    if (hash(cell) > 0.92) {
+        vec2 f = fract(g) - 0.5;
+        float tw = pow(0.5 + 0.5 * sin(t * 4.0 + hash(cell + 2.0) * 40.0), 4.0);
+        c += col * smoothstep(0.1, 0.0, length(f)) * tw * 0.8;
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_HEX_BOKEH = COMMON + """
+float hexD(vec2 p) { p = abs(p); return max(p.x * 0.866 + p.y * 0.5, p.y); }
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    vec3 add = vec3(0.0);
+    for (int i = 0; i < 18; i++) {
+        float fi = float(i);
+        vec2 p = vec2(hash(vec2(fi, 1.0)), hash(vec2(fi, 2.0)));
+        p += vec2(sin(t * 0.3 + fi), cos(t * 0.25 + fi * 1.7)) * 0.03;
+        float r = 0.04 + 0.06 * hash(vec2(fi, 3.0));
+        float h = hexD(aspectD(vUv, p) / r);
+        float m = smoothstep(1.0, 0.9, h) * (0.6 + 0.4 * smoothstep(0.6, 1.0, h));
+        float tw = 0.6 + 0.4 * sin(t * 1.5 + fi * 2.1);
+        float k = hash(vec2(fi, 5.0));
+        vec3 col = pick4(mix(vec3(1.0, 0.75, 0.45), vec3(1.0, 0.95, 0.85), k),
+                         mix(vec3(1.0, 0.5, 0.75), vec3(1.0, 0.8, 0.9), k),
+                         mix(vec3(0.35, 0.6, 1.0), vec3(0.7, 0.9, 1.0), k), spectrum(k));
+        float away = smoothstep(0.12, 0.42, length(aspectD(p, vec2(0.5, 0.55))));
+        add += col * m * tw * away;
+    }
+    c += add * 0.32 * uVar.y;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_SEQUINS = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    vec3 col = pick4(vec3(0.95, 0.95, 1.0), vec3(1.0, 0.85, 0.45), vec3(1.0, 0.55, 0.8), vec3(1.0));
+    for (int i = 0; i < 3; i++) {
+        float fi = float(i);
+        vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * (30.0 + fi * 22.0);
+        vec2 cell = floor(g);
+        float hs = hash(cell + fi * 7.0);
+        if (hs > 0.8) {
+            vec2 f = fract(g) - 0.5;
+            float tw = pow(max(0.0, sin(t * (2.0 + 5.0 * hs) + hs * 80.0)), 8.0);
+            float st = smoothstep(0.25, 0.0, length(f))
+                     + max(0.0, 1.0 - abs(f.x) * 10.0 - abs(f.y) * 2.0) * 0.6
+                     + max(0.0, 1.0 - abs(f.y) * 10.0 - abs(f.x) * 2.0) * 0.6;
+            vec3 k = uVar.x > 2.5 ? spectrum(fract(hs * 7.0)) : col;
+            c += k * st * tw * 1.2 * uVar.y;
+        }
+    }
+    for (int i = 0; i < 8; i++) {
+        float fi = float(i);
+        vec2 p = vec2(hash(vec2(fi, 8.0)), hash(vec2(fi, 9.0)) + 0.02 * sin(t * 0.5 + fi));
+        float d = length(aspectD(vUv, p));
+        vec3 k = uVar.x > 2.5 ? spectrum(hash(vec2(fi, 4.0))) : col;
+        c += k * smoothstep(0.09, 0.0, d) * 0.12;
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_DIAMOND = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    vec2 p = rot(0.7854) * ((vUv - 0.5) * vec2(uOutAspect, 1.0));
+    vec3 add = vec3(0.0);
+    for (int L = 0; L < 2; L++) {
+        float fl = float(L);
+        float ph = fract(t * 0.25 + fl * 0.5);
+        float z = exp2(ph * 2.0);
+        float a = sin(ph * 3.1416);
+        vec2 q = p * 9.0 / z;
+        vec2 cell = floor(q);
+        vec2 f = fract(q) - 0.5;
+        float m = smoothstep(0.42, 0.3, max(abs(f.x), abs(f.y)));
+        float hs = hash(cell + fl * 13.0);
+        float on = step(0.45, hs) * (0.5 + 0.5 * sin(t * 3.0 + hs * 30.0));
+        float rad = smoothstep(0.1, 0.6, length(p));
+        vec3 col = pick4(mix(vec3(1.0, 0.7, 0.85), vec3(0.8, 0.85, 1.0), hs), vec3(1.0, 0.85, 0.5),
+                         vec3(0.4, 0.75, 1.0), spectrum(hs));
+        add += col * m * on * a * rad;
+    }
+    c += add * 0.9 * uVar.y;
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_AUTUMN_WIND = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    vec3 warm = pick4(vec3(1.08, 0.96, 0.82), vec3(1.1, 0.92, 0.85), vec3(0.96, 1.05, 0.92), vec3(1.1, 1.0, 0.8));
+    c *= warm;
+    for (int i = 0; i < 22; i++) {
+        float fi = float(i);
+        float sp = 0.10 + 0.08 * hash(vec2(fi, 1.0));
+        float x = fract(hash(vec2(fi, 2.0)) + t * sp) * 1.3 - 0.15;
+        float y = hash(vec2(fi, 3.0)) * 1.4 - 0.05 - x * 0.35 + 0.05 * sin(t * 1.3 + fi);
+        vec2 q = aspectD(vUv, vec2(x, y));
+        float s = 0.032 + 0.024 * hash(vec2(fi, 4.0));
+        q = rot(t * (1.5 + hash(vec2(fi, 5.0)) * 2.0) + fi) * q / s;
+        q.y *= 1.0 + 0.6 * abs(sin(t * 3.0 + fi));
+        float leaf = smoothstep(1.0, 0.85, length(q * vec2(1.0, 2.2)) + 0.25 * abs(q.x));
+        float k = hash(vec2(fi, 6.0));
+        vec3 col = pick4(mix(vec3(0.95, 0.45, 0.1), vec3(1.0, 0.75, 0.2), k),
+                         mix(vec3(0.8, 0.12, 0.08), vec3(1.0, 0.4, 0.1), k),
+                         mix(vec3(0.3, 0.7, 0.2), vec3(0.65, 0.85, 0.3), k),
+                         mix(vec3(1.0, 0.8, 0.25), vec3(1.0, 0.9, 0.5), k));
+        c = mix(c, col * (0.85 + 0.15 * q.x), leaf * 0.92);
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_WARM_HAZE = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    vec3 tint = pick4(vec3(1.0, 0.78, 0.5), vec3(1.0, 0.6, 0.65), vec3(0.75, 0.85, 1.0), vec3(1.0, 0.85, 0.45));
+    float haze = fbm(vec2(vUv.x * 3.0 + t * 0.15, vUv.y * 2.0)) * (0.4 + 0.6 * vUv.y);
+    c = mix(c, c * tint * 1.08, 0.55 * uVar.y);
+    c = mix(c, tint, haze * 0.28 * uVar.y);
+    vec2 g = vec2(vUv.x * uOutAspect + t * 0.03, vUv.y + t * 0.01) * 40.0;
+    vec2 cell = floor(g);
+    float hs = hash(cell);
+    if (hs > 0.9) {
+        vec2 f = fract(g) - 0.5 - (vec2(hash(cell + 3.1), hash(cell + 5.7)) - 0.5) * 0.6;
+        c += tint * smoothstep(0.12, 0.0, length(f)) * 0.35 * (0.5 + 0.5 * sin(t * 2.0 + hs * 50.0));
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_FIRE_BURST = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    float pulse = 0.75 + 0.25 * sin(t * 2.0);
+    float y = vUv.y;
+    float n = fbm(vec2(vUv.x * 5.0 * uOutAspect, y * 4.0 - t * 2.2));
+    float h = (0.34 + 0.24 * n) * pulse * uVar.y;
+    float f = clamp((h - y) / max(h, 0.01), 0.0, 1.0);
+    f *= 0.6 + 0.6 * fbm(vec2(vUv.x * 12.0, y * 8.0 - t * 4.0));
+    vec3 a = pick4(vec3(0.9, 0.2, 0.02), vec3(0.1, 0.3, 1.0), vec3(0.1, 0.9, 0.4), vec3(0.6, 0.15, 1.0));
+    vec3 b = pick4(vec3(1.0, 0.85, 0.3), vec3(0.7, 0.95, 1.0), vec3(0.8, 1.0, 0.6), vec3(1.0, 0.7, 1.0));
+    vec3 fc = mix(a, b, smoothstep(0.3, 1.0, f));
+    c = mix(c, fc, smoothstep(0.1, 0.55, f));
+    c += a * smoothstep(0.6, 0.0, y) * 0.18 * pulse;
+    vec2 g = vec2(vUv.x * uOutAspect * 25.0, y * 25.0 - t * 3.0);
+    vec2 cell = floor(g);
+    if (hash(cell) > 0.94) c += b * smoothstep(0.15, 0.0, length(fract(g) - 0.5)) * smoothstep(0.7, 0.1, y);
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_RAINBOW_DUST = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    for (int i = 0; i < 2; i++) {
+        float fi = float(i);
+        vec2 g = vec2(vUv.x * uOutAspect, vUv.y) * (16.0 + fi * 12.0) + vec2(t * 0.4, -t * 0.25) * (1.0 + fi);
+        vec2 cell = floor(g);
+        float hs = hash(cell + fi * 5.0);
+        if (hs > 0.75) {
+            vec2 f = fract(g) - 0.5 - (vec2(hash(cell + 2.3), hash(cell + 7.1)) - 0.5) * 0.5;
+            float tw = 0.5 + 0.5 * sin(t * 3.0 + hs * 60.0);
+            float hue = fract(hs * 5.0 + t * 0.1);
+            vec3 col = pick4(spectrum(hue), mix(vec3(1.0, 0.45, 0.8), vec3(0.65, 0.4, 1.0), fract(hs * 3.0)),
+                             mix(vec3(0.2, 0.95, 0.9), vec3(0.35, 0.6, 1.0), fract(hs * 3.0)), vec3(1.0));
+            c += col * smoothstep(0.18, 0.0, length(f)) * tw * 0.8 * uVar.y;
+        }
+    }
+    gl_FragColor = finish(c);
+}
+"""
+
+    private const val FX_SHINE = COMMON + """
+void main() {
+    float t = uTime * uVar.z;
+    vec3 c = px(vUv);
+    float ph = fract(t * 0.45);
+    float pos = -0.4 + ph * 2.2;
+    float d = (vUv.x * uOutAspect + vUv.y * 0.6) / (uOutAspect + 0.6) - pos;
+    float band = exp(-d * d * 260.0) + 0.4 * exp(-d * d * 30.0);
+    vec3 col = pick4(vec3(1.0), vec3(1.0, 0.85, 0.5), spectrum(fract(vUv.y + t * 0.2)), vec3(1.0, 0.6, 0.85));
+    c += col * band * 0.4 * uVar.y;
+    gl_FragColor = finish(c);
+}
+"""
+
     val fragments: Map<String, String> = mapOf(
         "plain" to PLAIN,
         "cinematic" to CINEMATIC,
@@ -1979,10 +2493,91 @@ void main() {
         "fx_lanterns" to FX_LANTERNS,
         "fx_heart_burst" to FX_HEART_BURST,
         "fx_confetti" to FX_CONFETTI,
+        "fx_quake" to FX_QUAKE,
+        "fx_bounce" to FX_BOUNCE,
+        "fx_wobble" to FX_WOBBLE,
+        "fx_flash_beat" to FX_FLASH_BEAT,
+        "fx_soft_blur" to FX_SOFT_BLUR,
+        "fx_fade" to FX_FADE,
+        "fx_tape" to FX_TAPE,
+        "fx_vintage" to FX_VINTAGE,
+        "fx_rgb" to FX_RGB,
+        "fx_rainbow_wave" to FX_RAINBOW_WAVE,
+        "fx_flicker" to FX_FLICKER,
+        "fx_blink" to FX_BLINK,
+        "fx_electric_frame" to FX_ELECTRIC_FRAME,
+        "fx_flame_frame" to FX_FLAME_FRAME,
+        "fx_glow_frame" to FX_GLOW_FRAME,
+        "fx_likes" to FX_LIKES,
+        "fx_outline_hearts" to FX_OUTLINE_HEARTS,
+        "fx_hex_bokeh" to FX_HEX_BOKEH,
+        "fx_sequins" to FX_SEQUINS,
+        "fx_diamond" to FX_DIAMOND,
+        "fx_shine" to FX_SHINE,
+        "fx_rainbow_dust" to FX_RAINBOW_DUST,
+        "fx_autumn_wind" to FX_AUTUMN_WIND,
+        "fx_warm_haze" to FX_WARM_HAZE,
+        "fx_fire_burst" to FX_FIRE_BURST,
     )
 
+    /** How many styles each pack effect has; "fx_x~2" = fx_x in style 2. */
+    val styleCount: Map<String, Int> = mapOf(
+        "fx_quake" to 4,
+        "fx_bounce" to 4,
+        "fx_wobble" to 4,
+        "fx_flash_beat" to 4,
+        "fx_soft_blur" to 4,
+        "fx_fade" to 3,
+        "fx_tape" to 4,
+        "fx_vintage" to 4,
+        "fx_rgb" to 4,
+        "fx_rainbow_wave" to 4,
+        "fx_flicker" to 4,
+        "fx_blink" to 4,
+        "fx_electric_frame" to 4,
+        "fx_flame_frame" to 4,
+        "fx_glow_frame" to 4,
+        "fx_likes" to 4,
+        "fx_outline_hearts" to 4,
+        "fx_hex_bokeh" to 4,
+        "fx_sequins" to 4,
+        "fx_diamond" to 4,
+        "fx_shine" to 4,
+        "fx_rainbow_dust" to 4,
+        "fx_autumn_wind" to 4,
+        "fx_warm_haze" to 4,
+        "fx_fire_burst" to 4,
+    )
+
+    /** The shader id behind an effect id ("fx_x~2" -> "fx_x"). */
+    fun baseOf(id: String): String = id.substringBefore('~')
+
+    /** True when the id (or its base) is a known template / effect. */
+    fun has(id: String): Boolean = fragments.containsKey(baseOf(id))
+
+    /** uVar for an id: (style, amount, speed, 0). */
+    fun varOf(id: String): FloatArray {
+        val st = id.substringAfter('~', "0").toFloatOrNull() ?: 0f
+        return floatArrayOf(st, 1f, 1f, 0f)
+    }
+
+    /** Every id with its own thumbnail: templates, effects and their styles. */
+    val allIds: List<String> by lazy {
+        val out = ArrayList<String>()
+        for (id in fragments.keys) {
+            out += id
+            for (k in 1 until (styleCount[id] ?: 1)) out += "$id~$k"
+        }
+        out
+    }
+
     /** The time used for the template's thumbnail card. */
-    fun thumbTime(id: String): Float = when (id) {
+    fun thumbTime(id: String): Float = when (baseOf(id)) {
+        "fx_flash_beat" -> 2.05f
+        "fx_bounce" -> 2.0f
+        "fx_shine" -> 3.13f
+        "fx_quake" -> 2.77f
+        "fx_fade" -> 0.4f
         "memory" -> 3.6f
         "color_return" -> 5.0f
         "love_frame" -> 2.0f

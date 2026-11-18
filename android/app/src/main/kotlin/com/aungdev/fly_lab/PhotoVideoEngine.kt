@@ -162,8 +162,9 @@ class PhotoRenderer {
     }
 
     private fun program(id: String): Int {
-        programs[id]?.let { return it }
-        val frag = PhotoTemplates.fragments[id] ?: error("no template $id")
+        val base = PhotoTemplates.baseOf(id)
+        programs[base]?.let { return it }
+        val frag = PhotoTemplates.fragments[base] ?: error("no template $id")
         val p = GLES20.glCreateProgram()
         GLES20.glAttachShader(p, compile(GLES20.GL_VERTEX_SHADER, PhotoTemplates.VERTEX))
         GLES20.glAttachShader(p, compile(GLES20.GL_FRAGMENT_SHADER, frag))
@@ -172,7 +173,7 @@ class PhotoRenderer {
         val ok = IntArray(1)
         GLES20.glGetProgramiv(p, GLES20.GL_LINK_STATUS, ok, 0)
         check(ok[0] != 0) { "link $id: " + GLES20.glGetProgramInfoLog(p) }
-        programs[id] = p
+        programs[base] = p
         return p
     }
 
@@ -222,7 +223,7 @@ class PhotoRenderer {
      * Only the last pass applies the user's look and the fade (uFinal).
      */
     fun draw(chain: List<String>, t: Float, dur: Float, w: Int, h: Int, adj: FloatArray) {
-        val ids = chain.filter { PhotoTemplates.fragments.containsKey(it) }
+        val ids = chain.filter { PhotoTemplates.has(it) }
             .ifEmpty { listOf("cinematic") }
         if (ids.size == 1) {
             pass(ids[0], tex, imgAspect, 0f, 1f, t, dur, w, h, adj)
@@ -260,6 +261,8 @@ class PhotoRenderer {
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFinal"), finalPass)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFlipIn"), flipIn)
         GLES20.glUniform2f(GLES20.glGetUniformLocation(p, "uFade"), 1f, 1f)
+        val v = PhotoTemplates.varOf(id)
+        GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uVar"), v[0], v[1], v[2], v[3])
         GLES20.glEnableVertexAttribArray(0)
         GLES20.glVertexAttribPointer(0, 2, GLES20.GL_FLOAT, false, 0, quad)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -438,7 +441,7 @@ class PhotoVideoEngine(
                 val px = IntArray(tw * th)
                 val neutral = floatArrayOf(0f, 1f, 1f, 0f, 0f, 0f, 0f, 1f)
                 val out = HashMap<String, ByteArray>()
-                for (id in PhotoTemplates.fragments.keys) {
+                for (id in PhotoTemplates.allIds) {
                     r.draw(listOf(id), PhotoTemplates.thumbTime(id), 8f, tw, th, neutral)
                     buf.rewind()
                     GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)

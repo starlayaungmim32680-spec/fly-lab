@@ -23,7 +23,8 @@ package com.aungdev.fly_lab
 // Channel "flylab/project":
 //   addMedia {items: [{path, video}]}  -> [{media, video, dur, aspect, thumb}]
 //   setTimeline {clips: [{id, media, dur, template, from, speed}]}  (from = source start, E1b; speed E1c)
-//   setLook {adj[8], effects[], fit, bgMode, bgColor[3]}
+//   setLook {adj[8], fx: [{id, start, end, x, y, r, placed}], fit, bgMode, bgColor[3]}
+//   thumbs {media} (media -1 = the built-in sample picture)
 //   setRatio {ratio: "9:16" | "1:1" | "4:5" | "16:9"} -> {textureId, width, height}
 //   preview -> {textureId, width, height}
 //   play / pause / seek {t} / position -> {t, playing, total}
@@ -84,10 +85,20 @@ class Media(
 class TClip(val id: Int, val media: Media, val dur: Float, val template: String,
             val from: Float = 0f, val speed: Float = 1f)
 
+/**
+ * One effect on the EFFECTS TRACK (18 Nov 2026): on screen from start to end
+ * (project seconds). placed = only inside a circle at (x, y) (0..1, y down),
+ * radius r in frame heights; otherwise the whole frame.
+ */
+class FxClip(
+    val id: String, val start: Float, val end: Float,
+    val x: Float = 0.5f, val y: Float = 0.5f, val r: Float = 0.3f, val placed: Boolean = false,
+)
+
 /** The project's look. */
 class PLook(
     val adj: FloatArray = floatArrayOf(0f, 1f, 1f, 0f, 0f, 0f, 0f, 1f),
-    val effects: List<String> = emptyList(),
+    val fx: List<FxClip> = emptyList(),
     val fit: Boolean = false,
     val bgMode: Int = 0,
     val bgColor: FloatArray = floatArrayOf(0f, 0f, 0f),
@@ -224,21 +235,23 @@ class ProjectRenderer {
         drawQuad()
         if (src.oes) GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
         // 2 + 3. template, then effects.
-        val tpl = if (PhotoTemplates.fragments.containsKey(template)) template else "plain"
-        val chain = listOf(tpl) + look.effects.filter { PhotoTemplates.fragments.containsKey(it) }.take(3)
+        val tpl = if (PhotoTemplates.has(template)) template else "plain"
+        val active = look.fx.filter { PhotoTemplates.has(it.id) && pt >= it.start && pt < it.end }.take(3)
+        val chain = listOf(tpl) + active.map { it.id }
         var cur = 0
         for ((i, id) in chain.withIndex()) {
             val last = i == chain.size - 1
             val out = if (last) target[0] else fb[1 - cur]
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, out)
             GLES20.glViewport(0, 0, w, h)
-            val p = program(id, PhotoTemplates.fragments[id]!!)
+            val p = program(PhotoTemplates.baseOf(id), PhotoTemplates.fragments[PhotoTemplates.baseOf(id)]!!)
             GLES20.glUseProgram(p)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tx[cur])
             val isTpl = i == 0
-            val t = if (isTpl) lt else pt
-            val d = if (isTpl) clipDur else total
+            val fxc = if (isTpl) null else active[i - 1]
+            val t = if (fxc == null) lt else pt - fxc.start
+            val d = if (fxc == null) clipDur else maxOf(0.1f, minOf(fxc.end, total) - fxc.start)
             val fx = if (isTpl) (if (fadeIn) 1f else 0f) else 1f
             val fy = if (isTpl) (if (fadeOut) 1f else 0f) else 1f
             GLES20.glUniform1i(GLES20.glGetUniformLocation(p, "uTex"), 0)
@@ -253,6 +266,13 @@ class ProjectRenderer {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFinal"), if (last) 1f else 0f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uFlipIn"), 1f)
             GLES20.glUniform2f(GLES20.glGetUniformLocation(p, "uFade"), fx, fy)
+            val v = PhotoTemplates.varOf(id)
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uVar"), v[0], v[1], v[2], v[3])
+            if (fxc != null && fxc.placed) {
+                GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uArea"), fxc.x, 1f - fxc.y, fxc.r, 1f)
+            } else {
+                GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uArea"), 0f, 0f, 0f, 0f)
+            }
             drawQuad()
             cur = 1 - cur
         }
@@ -431,6 +451,9 @@ class VDecoder(val m: Media, cb: Handler) {
 }
 
 // ====================================================================
+/** Media id of the built-in sample picture (effect cards). */
+private const val SAMPLE = -1
+
 class ProjectEngine(
     private val activity: Activity,
     private val textures: TextureRegistry,
@@ -490,7 +513,7 @@ class ProjectEngine(
                 val bg = call.argument<List<Double>>("bgColor")
                 look = PLook(
                     adj = if (a != null && a.size >= 8) FloatArray(8) { a[it].toFloat() } else look.adj,
-                    effects = call.argument<List<String>>("effects") ?: look.effects,
+                    fx = parseFx(call) ?: look.fx,
                     fit = call.argument<Boolean>("fit") ?: look.fit,
                     bgMode = call.argument<Int>("bgMode") ?: look.bgMode,
                     bgColor = if (bg != null && bg.size >= 3) FloatArray(3) { bg[it].toFloat() } else look.bgColor,
@@ -755,9 +778,66 @@ class ProjectEngine(
     // ----------------------------------------------------------- thumbs
     /** Every template AND effect on this media's picture, as small JPEG
      *  cards (made once per media; shaders stay compiled afterwards). */
+    /** setLook "fx": [{id, start, end, x, y, r, placed}] (or the old "effects": [id]). */
+    private fun parseFx(call: MethodCall): List<FxClip>? {
+        val list = call.argument<List<Map<String, Any>>>("fx")
+        if (list != null) {
+            return list.mapNotNull { mp ->
+                val id = mp["id"] as? String ?: return@mapNotNull null
+                fun f(k: String, d: Float) = (mp[k] as? Number)?.toFloat() ?: d
+                FxClip(id, f("start", 0f), f("end", 1e9f), f("x", 0.5f), f("y", 0.5f),
+                    f("r", 0.3f).coerceIn(0.05f, 1.2f), mp["placed"] as? Boolean ?: false)
+            }
+        }
+        val ids = call.argument<List<String>>("effects") ?: return null
+        return ids.map { FxClip(it, 0f, 1e9f) }
+    }
+
+    /** The picture behind the "Sample" effect cards (media id -1): drawn here,
+     *  no photo of a real person is shipped in the app. */
+    private val sample: Media by lazy { Media(SAMPLE, false, "", sampleBitmap(), 0f, 720f / 1280f, 0) }
+
+    private fun sampleBitmap(): Bitmap {
+        val w = 720
+        val h = 1280
+        val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val cv = android.graphics.Canvas(bm)
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        p.shader = android.graphics.LinearGradient(0f, 0f, 0f, h.toFloat(),
+            intArrayOf(0xFF2B1B4A.toInt(), 0xFF8E4B8F.toInt(), 0xFFFF8A80.toInt(), 0xFFFFC98B.toInt()),
+            floatArrayOf(0f, 0.38f, 0.66f, 0.8f), android.graphics.Shader.TileMode.CLAMP)
+        cv.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+        p.shader = android.graphics.RadialGradient(w * 0.5f, h * 0.7f, 260f,
+            intArrayOf(0xFFFFF3C4.toInt(), 0x00FFE0A0), null, android.graphics.Shader.TileMode.CLAMP)
+        cv.drawCircle(w * 0.5f, h * 0.7f, 260f, p)
+        p.shader = null
+        p.color = 0xFFFFF1D0.toInt()
+        cv.drawCircle(w * 0.5f, h * 0.7f, 95f, p)
+        val rnd = java.util.Random(7)
+        for (i in 0 until 14) {
+            p.color = android.graphics.Color.argb(40 + rnd.nextInt(50), 255, 220 + rnd.nextInt(35), 230)
+            cv.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h * 0.6f, 20f + rnd.nextFloat() * 60f, p)
+        }
+        p.color = 0xFF3A2350.toInt()
+        val far = android.graphics.Path()
+        far.moveTo(0f, h * 0.76f)
+        far.cubicTo(w * 0.25f, h * 0.70f, w * 0.45f, h * 0.80f, w * 0.7f, h * 0.73f)
+        far.cubicTo(w * 0.85f, h * 0.69f, w * 0.95f, h * 0.74f, w.toFloat(), h * 0.72f)
+        far.lineTo(w.toFloat(), h.toFloat()); far.lineTo(0f, h.toFloat()); far.close()
+        cv.drawPath(far, p)
+        p.color = 0xFF1E1230.toInt()
+        val near = android.graphics.Path()
+        near.moveTo(0f, h * 0.86f)
+        near.cubicTo(w * 0.3f, h * 0.80f, w * 0.6f, h * 0.90f, w.toFloat(), h * 0.83f)
+        near.lineTo(w.toFloat(), h.toFloat()); near.lineTo(0f, h.toFloat()); near.close()
+        cv.drawPath(near, p)
+        return bm
+    }
+
     private fun thumbs(mediaId: Int, result: MethodChannel.Result) {
         val h = gl ?: return result.error("no_preview", "No preview", null)
-        val m = media[mediaId] ?: return result.error("no_media", "No media", null)
+        val m = (if (mediaId == SAMPLE) sample else media[mediaId])
+            ?: return result.error("no_media", "No media", null)
         h.post {
             val fbo = IntArray(1)
             val tex = IntArray(1)
@@ -778,7 +858,7 @@ class ProjectEngine(
                 val src = FrameSrc(r.photoTexture(m), false, m.aspect, null)
                 val plain = PLook(fit = look.fit, bgMode = look.bgMode, bgColor = look.bgColor)
                 val out = HashMap<String, ByteArray>()
-                for (id in PhotoTemplates.fragments.keys) {
+                for (id in PhotoTemplates.allIds) {
                     GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
                     r.drawFrame(src, id, PhotoTemplates.thumbTime(id), 8f, 2.6f, 8f, plain,
                         false, false, tw, th)
