@@ -306,6 +306,21 @@ Build (arm64 only, ~20-150 s):
   channel stickerPreviews. Shapes checked with Skia on the PC.
 - Next: E4b video overlay (picture-in-picture with a moving video).
 
+## Lyric Card kit (19 Nov 2026): WORKS (Ko tested, 16:9 export)
+- Ko sent a CapCut tutorial (blurred video behind a sharp rounded copy of
+  the same video, a black lyric card blended so only the white words
+  show, handwriting text, music). Made it one-tap here:
+- Effect "Window Card" (fx_window, Frame tab + first in Trending), styles
+  Wide / Square / Tall / Circle: spiral blur (36 taps, per-pixel turn - no
+  grid) and a little darker behind, the same frame sharp inside a rounded
+  card with a soft shadow and thin rim. uWin = (x, y, half width of the
+  frame width) from the bar's place; on the video it shows a box (drag,
+  pinch, Size). No second video decoder needed.
+- Photo overlay "Blend" tab: Normal, Screen (black goes - lyric cards),
+  Multiply (white goes). TextLayer switches glBlendFunc per item.
+- Text presets in the Text panel: Plain, Lyric, Quote, Title, Handwriting,
+  Neon, Subtitle (font / style / colour / place / animation in one tap).
+
 ## CapCut-style editor - plan (Ko approved 17 Nov 2026: "the free way")
 Ko showed CapCut's toolbar (Edit, Audio, Text, Effects, Overlay, Captions,
 Filters, Adjust, Stickers, Generate media, AI avatar, Transcript, Aspect

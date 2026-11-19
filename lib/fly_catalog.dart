@@ -216,6 +216,11 @@ const List<FlyItem> flyEffects = [
   FlyItem('fx_fire_burst~1', 'Fire Burst Blue Fire', 'Party'),
   FlyItem('fx_fire_burst~2', 'Fire Burst Magic Green', 'Party'),
   FlyItem('fx_fire_burst~3', 'Fire Burst Purple', 'Party'),
+  // Window Card (19 Nov 2026): blurred video behind a sharp rounded card.
+  FlyItem('fx_window', 'Window Card', 'Frame'),
+  FlyItem('fx_window~1', 'Window Square', 'Frame'),
+  FlyItem('fx_window~2', 'Window Tall', 'Frame'),
+  FlyItem('fx_window~3', 'Window Circle', 'Frame'),
 ];
 
 const List<String> flyEffectCats = [
@@ -236,6 +241,7 @@ const int flyMaxEffects = 3;
 
 /// The "Trending" tab: a hand-picked mix from every category.
 const List<String> flyTrending = [
+  'fx_window',
   'fx_likes',
   'fx_flame_frame~2',
   'fx_outline_hearts',

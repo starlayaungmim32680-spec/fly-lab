@@ -2416,6 +2416,46 @@ void main() {
 }
 """
 
+    private const val FX_WINDOW = COMMON + """
+// Window Card (19 Nov 2026): blurred, darker frame behind a sharp rounded
+// window of the same picture. uWin = (centre x, y in vUv (y up), half width
+// as a part of the frame width, 0); styles: 0 wide, 1 square, 2 tall, 3 circle.
+uniform vec4 uWin;
+void main() {
+    vec2 c = uWin.xy;
+    float hw = uWin.z;
+    if (hw < 0.01) { c = vec2(0.5, 0.6); hw = 0.38; }
+    float s = uVar.x;
+    float ar = s < 0.5 ? 1.45 : (s < 1.5 ? 1.0 : (s < 2.5 ? 0.72 : 1.0));
+    vec2 h = vec2(hw * uOutAspect, hw * uOutAspect / ar);
+    float rad = s > 2.5 ? h.x : 0.11 * min(h.x, h.y);
+    vec2 p = (vUv - c) * vec2(uOutAspect, 1.0);
+    vec2 q = abs(p) - h + rad;
+    float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
+    // background: wide soft blur, a bit darker
+    vec3 b = vec3(0.0);
+    float w = 0.0;
+    float spin = hash(floor(vUv * uRes)) * 6.2832;
+    for (int i = 0; i < 36; i++) {
+        float fi = float(i);
+        float r = sqrt((fi + 0.5) / 36.0) * 0.05;
+        float a = fi * 2.39996 + spin;
+        b += px(vUv + vec2(cos(a), sin(a)) * r * vec2(1.0 / uOutAspect, 1.0));
+        w += 1.0;
+    }
+    b = b / w * 0.82;
+    // soft shadow under the card
+    float sh = 1.0 - smoothstep(0.0, 0.05, d - 0.012) ;
+    b *= 1.0 - 0.35 * sh * step(0.0, d);
+    vec3 fg = px(vUv);
+    float inside = 1.0 - smoothstep(-0.002, 0.002, d);
+    vec3 col = mix(b, fg, inside);
+    // thin light rim
+    col += vec3(0.35) * (1.0 - smoothstep(0.0, 0.004, abs(d))) * uVar.y;
+    gl_FragColor = finish(col);
+}
+"""
+
     val fragments: Map<String, String> = mapOf(
         "plain" to PLAIN,
         "cinematic" to CINEMATIC,
@@ -2518,6 +2558,7 @@ void main() {
         "fx_autumn_wind" to FX_AUTUMN_WIND,
         "fx_warm_haze" to FX_WARM_HAZE,
         "fx_fire_burst" to FX_FIRE_BURST,
+        "fx_window" to FX_WINDOW,
     )
 
     /** How many styles each pack effect has; "fx_x~2" = fx_x in style 2. */
@@ -2547,6 +2588,7 @@ void main() {
         "fx_autumn_wind" to 4,
         "fx_warm_haze" to 4,
         "fx_fire_burst" to 4,
+        "fx_window" to 4,
     )
 
     /** The shader id behind an effect id ("fx_x~2" -> "fx_x"). */

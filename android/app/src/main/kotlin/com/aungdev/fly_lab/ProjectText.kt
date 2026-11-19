@@ -48,6 +48,8 @@ class TItem(
     val animIn: Int, val animLoop: Int, val animOut: Int,
     /** E4: 0 text, 1 emoji, 2 drawn sticker (text = its name), 3 photo (path). */
     val kind: Int = 0, val path: String = "",
+    /** How it mixes with the video: 0 normal, 1 screen (black goes), 2 multiply (white goes). */
+    val blend: Int = 0,
 ) {
     /** Everything that changes the picture (not where it is). */
     val key: String get() = "$kind|$font|$style|$color|$color2|$path|$text"
@@ -61,7 +63,7 @@ class TItem(
                 f("x", 0.5f), f("y", 0.5f), f("scale", 1f).coerceIn(0.1f, 6f), f("rot", 0f),
                 i("font", 0), i("style", 0), i("color", -1), i("color2", 0xFF000000.toInt()),
                 i("animIn", 0), i("animLoop", 0), i("animOut", 0),
-                i("kind", 0), mp["path"] as? String ?: "")
+                i("kind", 0), mp["path"] as? String ?: "", i("blend", 0))
         }
 
         fun parseAll(list: List<Map<String, Any>>?): List<TItem> = list?.mapNotNull { parse(it) } ?: emptyList()
@@ -400,6 +402,11 @@ void main() {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uRot"), -rot * PI.toFloat() / 180f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uAlpha"), a.coerceIn(0f, 1f))
             GLES20.glUniform1f(GLES20.glGetUniformLocation(p, "uReveal"), reveal)
+            when (t.blend) {
+                1 -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_COLOR)
+                2 -> GLES20.glBlendFunc(GLES20.GL_DST_COLOR, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                else -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            }
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }
         GLES20.glDisable(GLES20.GL_BLEND)

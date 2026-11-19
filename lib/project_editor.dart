@@ -172,6 +172,7 @@ class _Txt {
   int animIn = 1;
   int animLoop = 0;
   int animOut = 1;
+  int blend = 0; // photo: 0 normal, 1 screen (black goes), 2 multiply (white goes)
   double bw = 0; // the engine's bitmap size (for the box on the video)
   double bh = 0;
 
@@ -188,6 +189,7 @@ class _Txt {
     ..animIn = animIn
     ..animLoop = animLoop
     ..animOut = animOut
+    ..blend = blend
     ..bw = bw
     ..bh = bh;
 
@@ -209,6 +211,7 @@ class _Txt {
         'animOut': animOut,
         'kind': kind,
         'path': path,
+        'blend': blend,
       };
 }
 
@@ -525,7 +528,70 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     );
   }
 
-  Future<void> _addText() async {
+  /// Text presets: one tap to a ready look (the user can still change it).
+  static const List<String> _presets = [
+    'Plain', 'Lyric', 'Quote', 'Title', 'Handwriting', 'Neon', 'Subtitle',
+  ];
+
+  void _applyPreset(_Txt t, int p) {
+    switch (p) {
+      case 1: // song lyric: clean bold white, top right, typed in
+        t
+          ..font = 3
+          ..style = 0
+          ..scale = 0.55
+          ..x = 0.7
+          ..y = 0.32
+          ..animIn = 4
+          ..animOut = 1;
+      case 2: // quote on a dark box
+        t
+          ..font = 5
+          ..style = 2
+          ..color = 0xFFFFFFFF
+          ..color2 = 0xCC000000
+          ..scale = 0.6
+          ..y = 0.75
+          ..animIn = 3;
+      case 3: // big title
+        t
+          ..font = 4
+          ..style = 1
+          ..color = 0xFFFFE14D
+          ..color2 = 0xFF000000
+          ..scale = 1.3
+          ..y = 0.3
+          ..animIn = 2
+          ..animLoop = 1;
+      case 4: // handwriting under the card
+        t
+          ..font = 10
+          ..style = 0
+          ..scale = 0.7
+          ..y = 0.82
+          ..animIn = 1;
+      case 5: // neon
+        t
+          ..font = 6
+          ..style = 3
+          ..color = 0xFFFF7EB6
+          ..scale = 0.9
+          ..animIn = 6
+          ..animLoop = 4;
+      case 6: // subtitle at the bottom
+        t
+          ..font = 3
+          ..style = 1
+          ..color = 0xFFFFFFFF
+          ..color2 = 0xFF000000
+          ..scale = 0.55
+          ..y = 0.86
+          ..animIn = 0
+          ..animOut = 0;
+    }
+  }
+
+  Future<void> _addText([int preset = 0]) async {
     if (_clips.isEmpty) return;
     final String? words = await _askText('');
     if (!mounted || words == null || words.isEmpty) return;
@@ -537,6 +603,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       end = tot;
     }
     final _Txt t = _Txt(uid: _nextTx++, text: words, start: start, end: end);
+    _applyPreset(t, preset);
     setState(() {
       _texts.add(t);
       _txSel = t.uid;
@@ -1046,6 +1113,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     _sendTimeline();
   }
 
+  bool _isWindow(String id) => id.split('~').first == 'fx_window';
+
   _Fx? get _selFx {
     for (final _Fx f in _fx) {
       if (f.uid == _fxSel) return f;
@@ -1059,7 +1128,14 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     if (_clips.isEmpty) return;
     final _Fx? sel = _selFx;
     if (sel != null) {
-      setState(() => sel.id = id);
+      setState(() {
+        sel.id = id;
+        if (_isWindow(id) && !sel.placed) {
+          sel.placed = true;
+          sel.r = 0.38;
+          sel.y = 0.4;
+        }
+      });
       _sendLook();
       return;
     }
@@ -1071,6 +1147,13 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       end = tot;
     }
     final _Fx f = _Fx(uid: _nextFx++, id: id, start: start, end: end);
+    if (_isWindow(id)) {
+      // Window Card: a card at the top half, the size of 76% of the width.
+      f
+        ..placed = true
+        ..r = 0.38
+        ..y = 0.4;
+    }
     final int busy = _fx.where((o) => o.start < end && o.end > start).length;
     setState(() {
       _fx.add(f);
@@ -1390,7 +1473,19 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 6),
             children: [
-              _tool(Icons.add_comment_outlined, 'Add text', _addText),
+              for (int i = 0; i < _presets.length; i++)
+                _tool(
+                    const [
+                      Icons.add_comment_outlined,
+                      Icons.lyrics_outlined,
+                      Icons.format_quote,
+                      Icons.title,
+                      Icons.gesture,
+                      Icons.flare,
+                      Icons.subtitles_outlined,
+                    ][i],
+                    i == 0 ? 'Add text' : _presets[i],
+                    () => _addText(i)),
             ],
           ),
         ),
@@ -1469,12 +1564,25 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     final List<String> tabs = switch (t.kind) {
       1 => const ['Edit', 'Animation'],
       2 => const ['Edit', 'Color', 'Animation'],
-      3 => const ['Edit', 'Frame', 'Color', 'Animation'],
+      3 => const ['Edit', 'Frame', 'Blend', 'Color', 'Animation'],
       _ => const ['Edit', 'Font', 'Style', 'Color', 'Animation'],
     };
     final String tab = tabs[_txTab.clamp(0, tabs.length - 1)];
     Widget body;
     switch (tab) {
+      case 'Blend':
+        body = Column(children: [
+          _chips(const ['Normal', 'Screen', 'Multiply'], t.blend, (i) {
+            setState(() => t.blend = i);
+            _sendTexts();
+          }),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 2, 16, 4),
+            child: Text(
+                'Screen: black parts disappear (lyric cards) · Multiply: white parts disappear',
+                style: TextStyle(fontSize: 10.5, color: Colors.white54)),
+          ),
+        ]);
       case 'Frame':
         body = _chips(_photoFrames, t.style, (i) => _restyle(t, () => t.style = i));
       case 'Font':
@@ -2638,6 +2746,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                 setState(() => _panel = _Panel.effects);
                 _loadThumbs(sample: _sampleCards);
               }),
+              if (!_isWindow(f.id))
               _tool(Icons.open_with, f.placed ? 'Full screen' : 'Place on video',
                   () {
                 setState(() => f.placed = !f.placed);
@@ -2668,9 +2777,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     child: Text('Size', style: TextStyle(fontSize: 12))),
                 Expanded(
                   child: Slider(
-                    value: f.r.clamp(0.08, 0.9),
+                    value: f.r.clamp(0.08, _isWindow(f.id) ? 0.5 : 0.9),
                     min: 0.08,
-                    max: 0.9,
+                    max: _isWindow(f.id) ? 0.5 : 0.9,
                     onChanged: (v) {
                       setState(() => f.r = v);
                       _sendLook();
@@ -2956,6 +3065,12 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       final double cx = f.x * b.maxWidth;
       final double cy = f.y * b.maxHeight;
       final double rad = f.r * b.maxHeight;
+      // Window Card: a box (half width = r of the frame width).
+      final bool win = _isWindow(f.id);
+      final int st = int.tryParse(f.id.split('~').length > 1 ? f.id.split('~')[1] : '0') ?? 0;
+      final double ar = const [1.45, 1.0, 0.72, 1.0][st.clamp(0, 3)];
+      final double hw = f.r * b.maxWidth;
+      final double hh = hw / ar;
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapDown: (d) {
@@ -2970,21 +3085,25 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           setState(() {
             f.x = (f.x + d.focalPointDelta.dx / b.maxWidth).clamp(0.0, 1.0);
             f.y = (f.y + d.focalPointDelta.dy / b.maxHeight).clamp(0.0, 1.0);
-            if (d.pointerCount > 1) f.r = (_r0 * d.scale).clamp(0.08, 0.9);
+            if (d.pointerCount > 1) {
+              f.r = (_r0 * d.scale).clamp(0.08, win ? 0.5 : 0.9);
+            }
           });
           _sendLook();
         },
         child: Stack(
           children: [
             Positioned(
-              left: cx - rad,
-              top: cy - rad,
-              width: rad * 2,
-              height: rad * 2,
+              left: cx - (win ? hw : rad),
+              top: cy - (win ? hh : rad),
+              width: (win ? hw : rad) * 2,
+              height: (win ? hh : rad) * 2,
               child: IgnorePointer(
                 child: Container(
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
+                    shape: win && st != 3 ? BoxShape.rectangle : BoxShape.circle,
+                    borderRadius:
+                        win && st != 3 ? BorderRadius.circular(10) : null,
                     border: Border.all(color: Colors.white70, width: 1.5),
                   ),
                   alignment: Alignment.center,

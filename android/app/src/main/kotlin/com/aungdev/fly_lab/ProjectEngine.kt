@@ -269,7 +269,11 @@ class ProjectRenderer {
             GLES20.glUniform2f(GLES20.glGetUniformLocation(p, "uFade"), fx, fy)
             val v = PhotoTemplates.varOf(id)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uVar"), v[0], v[1], v[2], v[3])
-            if (fxc != null && fxc.placed) {
+            val isWin = PhotoTemplates.baseOf(id) == "fx_window"
+            if (isWin && fxc != null) {
+                GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uWin"), fxc.x, 1f - fxc.y, fxc.r, 0f)
+            }
+            if (fxc != null && fxc.placed && !isWin) {
                 GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uArea"), fxc.x, 1f - fxc.y, fxc.r, 1f)
             } else {
                 GLES20.glUniform4f(GLES20.glGetUniformLocation(p, "uArea"), 0f, 0f, 0f, 0f)
