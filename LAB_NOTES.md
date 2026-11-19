@@ -268,6 +268,28 @@ Build (arm64 only, ~20-150 s):
   44kHz 2ch s16 9.0s | AAC 392 blocks | muxed" (or "NO sound: ...").
   First test seemed silent only because a phone call was on.
 
+## Project editor E3 - Text (19 Nov 2026): WORKS (Ko tested)
+- Toolbar "Text" -> Add text (a dialog; Myanmar keyboard works). A text is
+  an ORANGE bar on a text track (3 s at the playhead; drag / trim like the
+  other bars). On the video: tap a text to pick it, drag to move, pinch to
+  resize, twist with two fingers to turn, double-tap to change the words.
+- Panel tabs: Edit (Edit text, Duplicate, Whole video, Center, Delete),
+  Font (11, with "မြန်မာ Aa" previews drawn by the engine), Style (Plain,
+  Outline, Box, Neon, 3D, Gradient), Color (text + outline / box / 2nd),
+  Animation (In: Fade, Pop, Slide up, Typewriter, Bounce, Zoom; While on
+  screen: Pulse, Wiggle, Float, Blink; Out: Fade, Pop, Slide down).
+- Native: ProjectText.kt. TextArt draws the words into a Bitmap with
+  Android StaticLayout (Myanmar shaping by the system; missing letters
+  fall back to system fonts), TextLayer blends them on the frame after
+  the effects (preview AND export), animation worked out per frame.
+  Channel: setTexts {texts}, textSize {text} -> [w, h], fontPreviews.
+- Fonts: android/app/src/main/assets/fonts (~1 MB): Padauk, Padauk Bold,
+  Noto Sans Myanmar, Noto Sans Myanmar Black, Noto Serif Myanmar (Myanmar
+  subsets) + Pacifico, Bebas Neue, Lobster, Permanent Marker, Dancing
+  Script, Bangers (Latin). All SIL OFL 1.1 (assets/fonts/OFL.txt), taken
+  from the @fontsource npm packages, woff -> ttf with fontTools. Myanmar
+  shaping of the files checked with HarfBuzz on the PC.
+
 ## CapCut-style editor - plan (Ko approved 17 Nov 2026: "the free way")
 Ko showed CapCut's toolbar (Edit, Audio, Text, Effects, Overlay, Captions,
 Filters, Adjust, Stickers, Generate media, AI avatar, Transcript, Aspect

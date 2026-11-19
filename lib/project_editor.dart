@@ -11,6 +11,9 @@
 // under a fixed white playhead, and a bottom toolbar (Edit, Templates,
 // Effects, Filters, Adjust, Ratio, Background, Add). A tool opens its
 // panel in place of the toolbar; the tick closes it.
+// E3 Text (19 Nov 2026): Text tool - words in Myanmar or English (11 fonts
+// in assets/fonts, OFL), 6 styles, colours, animations in / loop / out;
+// orange bars on a text track; on the video: drag, pinch, twist.
 // E2 Audio (19 Nov 2026): Audio tool - Add music from the phone (green
 // bars on an audio track: drag, trim, volume, fade in / out), the clips'
 // own sound on / off, and a Volume per video clip (Edit -> Volume).
@@ -135,6 +138,76 @@ class _Audio {
       };
 }
 
+/// One text on the TEXT TRACK (E3): drawn by the engine with Android's text
+/// layout (Myanmar shaped right). [x], [y] = centre (0..1 from the
+/// top-left), [scale] 1 = 96 px letters on a 1280-high frame, [rot] degrees.
+class _Txt {
+  _Txt({required this.uid, required this.text, required this.start, required this.end});
+  final int uid;
+  String text;
+  double start;
+  double end;
+  double x = 0.5;
+  double y = 0.5;
+  double scale = 1;
+  double rot = 0;
+  int font = 4;
+  int style = 0;
+  int color = 0xFFFFFFFF;
+  int color2 = 0xFF000000;
+  int animIn = 1;
+  int animLoop = 0;
+  int animOut = 1;
+  double bw = 0; // the engine's bitmap size (for the box on the video)
+  double bh = 0;
+
+  _Txt copy(int newUid) => _Txt(uid: newUid, text: text, start: start, end: end)
+    ..x = x
+    ..y = (y + 0.08).clamp(0.0, 1.0)
+    ..scale = scale
+    ..rot = rot
+    ..font = font
+    ..style = style
+    ..color = color
+    ..color2 = color2
+    ..animIn = animIn
+    ..animLoop = animLoop
+    ..animOut = animOut
+    ..bw = bw
+    ..bh = bh;
+
+  Map<String, Object> toMap() => {
+        'uid': uid,
+        'text': text,
+        'start': start,
+        'end': end,
+        'x': x,
+        'y': y,
+        'scale': scale,
+        'rot': rot,
+        'font': font,
+        'style': style,
+        'color': color,
+        'color2': color2,
+        'animIn': animIn,
+        'animLoop': animLoop,
+        'animOut': animOut,
+      };
+}
+
+const List<String> _fontNames = [
+  'Default', 'Padauk', 'Padauk Bold', 'Noto Sans', 'Noto Black',
+  'Noto Serif', 'Pacifico', 'Bebas', 'Lobster', 'Marker', 'Dancing', 'Bangers',
+];
+const List<String> _txStyles = ['Plain', 'Outline', 'Box', 'Neon', '3D', 'Gradient'];
+const List<String> _txIn = ['None', 'Fade', 'Pop', 'Slide up', 'Typewriter', 'Bounce', 'Zoom'];
+const List<String> _txLoop = ['None', 'Pulse', 'Wiggle', 'Float', 'Blink'];
+const List<String> _txOut = ['None', 'Fade', 'Pop', 'Slide down'];
+const List<int> _txColors = [
+  0xFFFFFFFF, 0xFF000000, 0xFFFFE14D, 0xFFFF7EB6, 0xFFFF3B5C, 0xFFFF9F43,
+  0xFF2ED573, 0xFF39D5FF, 0xFF3D7BFF, 0xFFA55EEA, 0xFFC8A165, 0xCC000000,
+];
+
 enum _Panel {
   none,
   edit,
@@ -143,6 +216,8 @@ enum _Panel {
   volume,
   audio,
   audioEdit,
+  text,
+  textEdit,
   fxEdit,
   templates,
   effects,
@@ -194,6 +269,15 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   int _nextFx = 1;
   int? _fxSel; // the effect bar being edited
   bool _sampleCards = true; // effect cards on the sample picture or my clip
+  final List<_Txt> _texts = [];
+  int _nextTx = 1;
+  int? _txSel; // the text being edited
+  int _txTab = 0; // Edit, Font, Style, Color, Animation
+  List<Uint8List>? _fontPrev;
+  bool _txBusy = false;
+  bool _txAgain = false;
+  double _s0 = 1;
+  double _rot0 = 0;
   final List<_Audio> _music = [];
   int _nextAu = 1;
   int? _auSel; // the music bar being edited
@@ -273,6 +357,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _fitAudio();
       _sendAudio();
     }
+    if (_texts.isNotEmpty) {
+      _fitTexts();
+      _sendTexts();
+    }
     try {
       await _ch.invokeMethod('setTimeline', {
         'clips': [for (final _Clip c in _clips) c.toMap()],
@@ -314,6 +402,173 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       if (f.end > tot) f.end = tot;
       if (f.end - f.start < 0.3) f.start = math.max(0.0, f.end - 0.3);
     }
+  }
+
+  // ------------------------------------------------------------- text
+  Future<void> _sendTexts() async {
+    if (_txBusy) {
+      _txAgain = true;
+      return;
+    }
+    _txBusy = true;
+    try {
+      do {
+        _txAgain = false;
+        await _ch.invokeMethod('setTexts', {
+          'texts': [for (final _Txt t in _texts) t.toMap()],
+        });
+      } while (_txAgain && mounted);
+    } catch (_) {
+    } finally {
+      _txBusy = false;
+    }
+  }
+
+  void _fitTexts() {
+    final double tot = _total;
+    _texts.removeWhere((t) => t.start >= tot - 0.1);
+    for (final _Txt t in _texts) {
+      if (t.end > tot) t.end = tot;
+      if (t.end - t.start < 0.3) t.start = math.max(0.0, t.end - 0.3);
+    }
+  }
+
+  _Txt? get _selTx {
+    for (final _Txt t in _texts) {
+      if (t.uid == _txSel) return t;
+    }
+    return null;
+  }
+
+  /// Ask the engine how big the words are (for the box on the video).
+  Future<void> _measure(_Txt t) async {
+    try {
+      final List<dynamic>? r =
+          await _ch.invokeListMethod<dynamic>('textSize', {'text': t.toMap()});
+      if (!mounted || r == null || r.length < 2) return;
+      setState(() {
+        t.bw = (r[0] as num).toDouble();
+        t.bh = (r[1] as num).toDouble();
+      });
+    } catch (_) {}
+  }
+
+  /// Changing how the text looks: send it, then measure it again.
+  void _restyle(_Txt t, VoidCallback change) {
+    setState(change);
+    _sendTexts();
+    _measure(t);
+  }
+
+  Future<String?> _askText(String initial) {
+    final TextEditingController tc = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        title: const Text('Text'),
+        content: TextField(
+          controller: tc,
+          autofocus: true,
+          minLines: 1,
+          maxLines: 5,
+          decoration: const InputDecoration(hintText: 'Type here · မြန်မာလို ရေးလို့ရပါတယ်'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, tc.text.trim()),
+              child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addText() async {
+    if (_clips.isEmpty) return;
+    final String? words = await _askText('');
+    if (!mounted || words == null || words.isEmpty) return;
+    final double tot = _total;
+    double start = _time.value.clamp(0.0, tot);
+    double end = math.min(start + 3, tot);
+    if (end - start < 0.5) {
+      start = math.max(0.0, tot - 3);
+      end = tot;
+    }
+    final _Txt t = _Txt(uid: _nextTx++, text: words, start: start, end: end);
+    setState(() {
+      _texts.add(t);
+      _txSel = t.uid;
+      _sel = null;
+      _fxSel = null;
+      _auSel = null;
+      _txTab = 0;
+      _panel = _Panel.textEdit;
+    });
+    _sendTexts();
+    _measure(t);
+  }
+
+  Future<void> _editText(_Txt t) async {
+    final String? words = await _askText(t.text);
+    if (!mounted || words == null || words.isEmpty) return;
+    _restyle(t, () => t.text = words);
+  }
+
+  Future<void> _loadFonts() async {
+    if (_fontPrev != null) return;
+    _fontPrev = const [];
+    try {
+      final List<dynamic>? r = await _ch.invokeListMethod<dynamic>('fontPreviews');
+      if (!mounted || r == null) return;
+      setState(() => _fontPrev = [for (final dynamic b in r) b as Uint8List]);
+    } catch (_) {
+      _fontPrev = null;
+    }
+  }
+
+  void _moveTx(_Txt t, double dt) {
+    final double len = t.end - t.start;
+    final double ns = (t.start + dt).clamp(0.0, math.max(0.0, _total - len));
+    setState(() {
+      t.start = ns;
+      t.end = ns + len;
+    });
+    _sendTexts();
+  }
+
+  void _trimTx(_Txt t, {double dStart = 0, double dEnd = 0}) {
+    setState(() {
+      if (dStart != 0) t.start = (t.start + dStart).clamp(0.0, t.end - 0.3);
+      if (dEnd != 0) {
+        t.end = (t.end + dEnd)
+            .clamp(t.start + 0.3, math.max(t.start + 0.3, _total));
+      }
+    });
+    _sendTexts();
+  }
+
+  void _deleteTx() {
+    final _Txt? t = _selTx;
+    if (t == null) return;
+    setState(() {
+      _texts.remove(t);
+      _txSel = null;
+      _panel = _Panel.text;
+    });
+    _sendTexts();
+  }
+
+  void _duplicateTx() {
+    final _Txt? t = _selTx;
+    if (t == null) return;
+    final _Txt c = t.copy(_nextTx++);
+    setState(() {
+      _texts.add(c);
+      _txSel = c.uid;
+    });
+    _sendTexts();
   }
 
   // ------------------------------------------------------------ audio
@@ -855,6 +1110,401 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     return lanes;
   }
 
+  List<List<_Txt>> _txLanes() {
+    final List<List<_Txt>> lanes = [];
+    final List<_Txt> sorted = [..._texts]
+      ..sort((a, b) => a.start.compareTo(b.start));
+    for (final _Txt t in sorted) {
+      List<_Txt>? home;
+      for (final List<_Txt> l in lanes) {
+        if (l.last.end <= t.start + 0.01) {
+          home = l;
+          break;
+        }
+      }
+      if (home == null) {
+        lanes.add([t]);
+      } else {
+        home.add(t);
+      }
+    }
+    return lanes;
+  }
+
+  /// An orange text bar. Tap = select; selected: drag to move, ends to trim.
+  Widget _txBar(_Txt t) {
+    final bool sel = t.uid == _txSel;
+    final double w = math.max(20.0, (t.end - t.start) * _pps);
+    Widget handle(bool left) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragUpdate: (d) => left
+              ? _trimTx(t, dStart: d.delta.dx / _pps)
+              : _trimTx(t, dEnd: d.delta.dx / _pps),
+          child: Container(
+            width: 14,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.horizontal(
+                left: Radius.circular(left ? 5 : 0),
+                right: Radius.circular(left ? 0 : 5),
+              ),
+            ),
+            child: Container(width: 2, height: 10, color: Colors.black54),
+          ),
+        );
+    return Positioned(
+      left: t.start * _pps,
+      top: 2,
+      height: _laneH - 4,
+      width: w,
+      child: GestureDetector(
+        onTap: () => _selectTx(sel ? null : t),
+        onHorizontalDragUpdate:
+            sel ? (d) => _moveTx(t, d.delta.dx / _pps) : null,
+        child: Container(
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFFFF9F43) : const Color(0xFF9A5A1C),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(
+                color: sel ? Colors.white : Colors.transparent, width: 1.2),
+          ),
+          child: Row(
+            children: [
+              if (sel) handle(true),
+              const SizedBox(width: 4),
+              const Icon(Icons.title, size: 11, color: Colors.white),
+              const SizedBox(width: 3),
+              Expanded(
+                child: Text(t.text.replaceAll('\n', ' '),
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                    style: const TextStyle(
+                        fontSize: 10, fontWeight: FontWeight.w700)),
+              ),
+              if (sel) handle(false),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _selectTx(_Txt? t) {
+    setState(() {
+      _txSel = t?.uid;
+      _sel = null;
+      _fxSel = null;
+      _auSel = null;
+      _panel = t == null ? _Panel.text : _Panel.textEdit;
+    });
+    if (t != null && t.bw == 0) _measure(t);
+  }
+
+  /// Text tool: add a text; the list of texts is the orange track.
+  Widget _textPanel() {
+    return Column(
+      children: [
+        _panelHeader(_texts.isEmpty ? 'Text' : 'Text · ${_texts.length}'),
+        SizedBox(
+          height: 70,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            children: [
+              _tool(Icons.add_comment_outlined, 'Add text', _addText),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text(
+              'Texts go on the orange track at the playhead · tap a text on the video or its bar to change it',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 10.5, color: Colors.white54)),
+        ),
+      ],
+    );
+  }
+
+  Widget _chips(List<String> names, int cur, ValueChanged<int> pick) {
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        children: [
+          for (int i = 0; i < names.length; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: ChoiceChip(
+                label: Text(names[i], style: const TextStyle(fontSize: 12)),
+                selected: cur == i,
+                onSelected: (_) => pick(i),
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _colorRow(String label, int cur, ValueChanged<int> pick) {
+    return SizedBox(
+      height: 44,
+      child: Row(
+        children: [
+          const SizedBox(width: 16),
+          SizedBox(width: 74, child: Text(label, style: const TextStyle(fontSize: 12))),
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final int c in _txColors)
+                  GestureDetector(
+                    onTap: () => pick(c),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: Color(c),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: cur == c ? Colors.white : Colors.white24,
+                            width: cur == c ? 2.5 : 1),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The selected text: words, font, style, colours, animation.
+  Widget _textEditPanel() {
+    final _Txt? t = _selTx;
+    if (t == null) return _textPanel();
+    const List<String> tabs = ['Edit', 'Font', 'Style', 'Color', 'Animation'];
+    Widget body;
+    switch (_txTab) {
+      case 1:
+        _loadFonts();
+        final List<Uint8List> prev = _fontPrev ?? const [];
+        body = SizedBox(
+          height: 70,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            children: [
+              for (int i = 0; i < _fontNames.length; i++)
+                GestureDetector(
+                  onTap: () => _restyle(t, () => t.font = i),
+                  child: Container(
+                    width: 92,
+                    margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: t.font == i ? Colors.white : Colors.transparent,
+                          width: 1.5),
+                    ),
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: i < prev.length
+                              ? Image.memory(prev[i], fit: BoxFit.contain)
+                              : const SizedBox(),
+                        ),
+                        Text(_fontNames[i],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 9.5)),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      case 2:
+        body = _chips(_txStyles, t.style, (i) => _restyle(t, () => t.style = i));
+      case 3:
+        body = Column(children: [
+          _colorRow('Text', t.color, (c) => _restyle(t, () => t.color = c)),
+          _colorRow(t.style == 2 ? 'Box' : 'Outline / 2nd', t.color2,
+              (c) => _restyle(t, () => t.color2 = c)),
+        ]);
+      case 4:
+        body = Column(children: [
+          const Padding(
+              padding: EdgeInsets.only(left: 16, top: 2),
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('In', style: TextStyle(fontSize: 11, color: Colors.white54)))),
+          _chips(_txIn, t.animIn, (i) {
+            setState(() => t.animIn = i);
+            _sendTexts();
+          }),
+          const Padding(
+              padding: EdgeInsets.only(left: 16),
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('While on screen',
+                      style: TextStyle(fontSize: 11, color: Colors.white54)))),
+          _chips(_txLoop, t.animLoop, (i) {
+            setState(() => t.animLoop = i);
+            _sendTexts();
+          }),
+          const Padding(
+              padding: EdgeInsets.only(left: 16),
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Out', style: TextStyle(fontSize: 11, color: Colors.white54)))),
+          _chips(_txOut, t.animOut, (i) {
+            setState(() => t.animOut = i);
+            _sendTexts();
+          }),
+        ]);
+      default:
+        body = SizedBox(
+          height: 70,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            children: [
+              _tool(Icons.edit, 'Edit text', () => _editText(t)),
+              _tool(Icons.copy_outlined, 'Duplicate', _duplicateTx),
+              _tool(Icons.straighten, 'Whole video', () {
+                setState(() {
+                  t.start = 0;
+                  t.end = _total;
+                });
+                _sendTexts();
+              }),
+              _tool(Icons.center_focus_strong, 'Center', () {
+                setState(() {
+                  t.x = 0.5;
+                  t.y = 0.5;
+                  t.rot = 0;
+                });
+                _sendTexts();
+              }),
+              _tool(Icons.delete_outline, 'Delete', _deleteTx),
+            ],
+          ),
+        );
+    }
+    return Column(
+      children: [
+        SizedBox(
+          height: 34,
+          child: Row(
+            children: [
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                    '${t.text.replaceAll('\n', ' ')} · ${_fmt(t.start)} - ${_fmt(t.end)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _selectTx(null),
+                icon: const Icon(Icons.check),
+              ),
+            ],
+          ),
+        ),
+        _catRow(tabs, tabs[_txTab], (v) => setState(() => _txTab = tabs.indexOf(v))),
+        body,
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+
+  /// Texts on the video: tap one to pick it; the picked one has a box -
+  /// drag to move, pinch to resize, twist with two fingers to turn,
+  /// double-tap to change the words.
+  Widget _textOverlay() {
+    return LayoutBuilder(builder: (context, b) {
+      final double fw = b.maxWidth;
+      final double fh = b.maxHeight;
+      final _Txt? sel = _selTx;
+      Rect boxOf(_Txt t) {
+        final double bh = t.bh * t.scale / 1280 * fh;
+        final double bw = t.bw * t.scale / 1280 * fh;
+        return Rect.fromCenter(center: Offset(t.x * fw, t.y * fh), width: bw, height: bh);
+      }
+
+      return GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTapUp: (d) {
+          final double now = _time.value;
+          _Txt? hit;
+          for (final _Txt t in _texts.reversed) {
+            if (now >= t.start && now < t.end && t.bw > 0 &&
+                boxOf(t).inflate(8).contains(d.localPosition)) {
+              hit = t;
+              break;
+            }
+          }
+          if (hit != null) {
+            _selectTx(hit);
+          } else if (_panel == _Panel.textEdit) {
+            _selectTx(null);
+          }
+        },
+        onDoubleTap: sel == null ? null : () => _editText(sel),
+        onScaleStart: sel == null
+            ? null
+            : (_) {
+                _s0 = sel.scale;
+                _rot0 = sel.rot;
+              },
+        onScaleUpdate: sel == null
+            ? null
+            : (d) {
+                setState(() {
+                  sel.x = (sel.x + d.focalPointDelta.dx / fw).clamp(0.0, 1.0);
+                  sel.y = (sel.y + d.focalPointDelta.dy / fh).clamp(0.0, 1.0);
+                  if (d.pointerCount > 1) {
+                    sel.scale = (_s0 * d.scale).clamp(0.15, 6.0);
+                    sel.rot = _rot0 + d.rotation * 180 / math.pi;
+                  }
+                });
+                _sendTexts();
+              },
+        child: Stack(
+          children: [
+            if (sel != null && sel.bw > 0)
+              Positioned.fromRect(
+                rect: boxOf(sel),
+                child: IgnorePointer(
+                  child: Transform.rotate(
+                    angle: sel.rot * math.pi / 180,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white, width: 1.4),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    });
+  }
+
   List<List<_Audio>> _auLanes() {
     final List<List<_Audio>> lanes = [];
     final List<_Audio> sorted = [..._music]
@@ -908,6 +1558,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _auSel = sel ? null : a.uid;
           _sel = null;
           _fxSel = null;
+          _txSel = null;
           _panel = sel ? _Panel.audio : _Panel.audioEdit;
         }),
         onHorizontalDragUpdate:
@@ -1093,10 +1744,12 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       final double half = box.maxWidth / 2;
       final List<List<_Fx>> lanes = _fxLanes();
       final List<List<_Audio>> auLanes = _auLanes();
+      final List<List<_Txt>> txLanes = _txLanes();
       final double stripW = _clips.fold(0.0, (s, c) => s + _widthOf(c));
       final double h = 66 +
           (lanes.isEmpty ? 0 : lanes.length * _laneH + 4) +
-          (auLanes.isEmpty ? 0 : auLanes.length * _laneH + 4);
+          (auLanes.isEmpty ? 0 : auLanes.length * _laneH + 4) +
+          (txLanes.isEmpty ? 0 : txLanes.length * _laneH + 4);
       return SizedBox(
         height: h,
         child: Stack(
@@ -1139,6 +1792,16 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         child: Stack(
                           clipBehavior: Clip.none,
                           children: [for (final _Fx f in lane) _fxBar(f)],
+                        ),
+                      ),
+                    if (txLanes.isNotEmpty) const SizedBox(height: 4),
+                    for (final List<_Txt> lane in txLanes)
+                      SizedBox(
+                        height: _laneH,
+                        width: math.max(stripW, 1.0),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [for (final _Txt t in lane) _txBar(t)],
                         ),
                       ),
                     if (auLanes.isNotEmpty) const SizedBox(height: 4),
@@ -1202,6 +1865,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _fxSel = sel ? null : f.uid;
           _sel = null;
           _auSel = null;
+          _txSel = null;
           _panel = sel ? _Panel.none : _Panel.fxEdit;
         }),
         onHorizontalDragUpdate:
@@ -1274,6 +1938,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _sel = sel ? null : c.id;
           _fxSel = null;
           _auSel = null;
+          _txSel = null;
           _panel = sel ? _Panel.none : _Panel.edit;
         });
         if (!sel) _loadThumbs();
@@ -1355,6 +2020,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _tool(Icons.content_cut, 'Edit', () => _open(_Panel.edit)),
           _tool(Icons.music_note, 'Audio', () => _open(_Panel.audio),
               active: _music.isNotEmpty || !_origOn),
+          _tool(Icons.title, 'Text', () => _open(_Panel.text),
+              active: _texts.isNotEmpty),
           _tool(Icons.auto_awesome_motion, 'Templates',
               () => _open(_Panel.templates)),
           _tool(Icons.auto_awesome, 'Effects', () => _open(_Panel.effects),
@@ -2069,6 +2736,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _Panel.volume => _volumePanel(),
       _Panel.audio => _audioPanel(),
       _Panel.audioEdit => _audioEditPanel(),
+      _Panel.text => _textPanel(),
+      _Panel.textEdit => _textEditPanel(),
       _Panel.templates => _templatesPanel(),
       _Panel.effects => _effectsPanel(),
       _Panel.filters => _filtersPanel(),
@@ -2176,6 +2845,11 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                               if (_panel == _Panel.fxEdit &&
                                   (_selFx?.placed ?? false))
                                 _placer(_selFx!),
+                              if (_texts.isNotEmpty &&
+                                  (_panel == _Panel.none ||
+                                      _panel == _Panel.text ||
+                                      _panel == _Panel.textEdit))
+                                _textOverlay(),
                             ],
                           ),
                         ),

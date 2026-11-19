@@ -102,6 +102,7 @@ class PLook(
     val fit: Boolean = false,
     val bgMode: Int = 0,
     val bgColor: FloatArray = floatArrayOf(0f, 0f, 0f),
+    val texts: List<TItem> = emptyList(),
 )
 
 /** Where a frame comes from: a photo texture, or a video (OES) texture. */
@@ -276,9 +277,14 @@ class ProjectRenderer {
             drawQuad()
             cur = 1 - cur
         }
+        // 4. texts (E3) on top of everything.
+        textLayer.draw(look.texts, pt, w, h)
     }
 
+    private val textLayer = TextLayer()
+
     fun release() {
+        textLayer.release()
         for (t in photoTex.values) GLES20.glDeleteTextures(1, intArrayOf(t), 0)
         photoTex.clear()
         if (fb[0] != 0) {
@@ -460,6 +466,8 @@ class ProjectEngine(
 ) : MethodChannel.MethodCallHandler {
 
     private val tag = "FlyProject"
+
+    init { TextArt.init(activity) }
     private val main = Handler(Looper.getMainLooper())
     private val fps = 30
 
@@ -523,6 +531,7 @@ class ProjectEngine(
                     fit = call.argument<Boolean>("fit") ?: look.fit,
                     bgMode = call.argument<Int>("bgMode") ?: look.bgMode,
                     bgColor = if (bg != null && bg.size >= 3) FloatArray(3) { bg[it].toFloat() } else look.bgColor,
+                    texts = look.texts,
                 )
                 result.success(null)
             }
@@ -551,6 +560,24 @@ class ProjectEngine(
                 result.success(null)
             }
             "pickAudio" -> AudioPick.pick(activity, result)
+            "setTexts" -> {
+                val l = look
+                look = PLook(l.adj, l.fx, l.fit, l.bgMode, l.bgColor,
+                    TItem.parseAll(call.argument<List<Map<String, Any>>>("texts")))
+                result.success(null)
+            }
+            "textSize" -> {
+                val mp = call.argument<Map<String, Any>>("text")
+                Thread {
+                    val t = mp?.let { TItem.parse(it) }
+                    val sz = try { t?.let { TextArt.size(it) } } catch (e: Throwable) { null }
+                    main.post { result.success(sz?.let { listOf(it.first, it.second) }) }
+                }.start()
+            }
+            "fontPreviews" -> Thread {
+                val out = try { TextArt.previews() } catch (e: Throwable) { emptyList() }
+                main.post { result.success(out) }
+            }.start()
             "pause" -> {
                 gl?.post { playing = false }
                 result.success(null)
