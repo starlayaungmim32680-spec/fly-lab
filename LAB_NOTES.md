@@ -478,3 +478,32 @@ a Pixel 6) 6. Face AR stickers 7. Merge into Fly Dev -> prod.
 - 19 Nov 2026 16:18: Ko APPROVED Phase 0 (Premium Dark) with refinements
   R1-R9 (PHASE0_DESIGN.md §0). P0.1 = colours + typography only; exact
   files in PHASE0_DESIGN.md §11. Waiting for Ko's go before coding.
+
+## P0.1 - colours + typography only (19 Nov 2026): WORKS (Ko tested on his phone)
+- Base: fly-lab 81cc884 (Ko's backup tag p0.1-before). Files: NEW
+  lib/studio/studio_tokens.dart, NEW lib/studio/studio_theme.dart,
+  CHANGED lib/project_editor.dart (106+ / 109-). Nothing else.
+- project_editor.dart: every UI colour and every TextStyle now comes from
+  StudioColors / StudioText; screen and the text dialog wrapped in
+  Theme(StudioTheme.dark). Track bars: Layers coral, Magic sky, Sound
+  amber (tint normally, solid + ink text when selected). Playhead = aurora
+  needle. _brand = the aurora. Two hint lines changed their colour words
+  (orange -> pink track, green -> amber track) to match the new colours.
+- Kept: user content colours (_backgrounds palette, text colours, sticker
+  colours, filter swatches), emoji size 30, all widgets, sizes, paddings,
+  logic, channels, Kotlin.
+- Checked in the sandbox (no Flutter SDK there): diff read line by line,
+  bracket balance same as before, no hard-coded UI colour left.
+- ACTUAL results on Ko's PC (19 Nov 2026, 16:37): working tree clean
+  before, tag p0.1-before pushed; after unzip git status = only
+  LAB_NOTES.md, lib/project_editor.dart, lib/studio/; git diff --stat
+  project_editor.dart 215 lines (106+ / 109-) as expected;
+  `flutter analyze lib` = No issues found; release build OK,
+  app-release.apk 41.7 MB (same size as before).
+- Phone (17:01): Ko: "အဆင်ပြေတယ်" (works) after testing the new colours
+  and the editor. No screenshots were sent, so no per-feature list is
+  recorded beyond Ko's OK.
+- Found, not changed (out of P0.1 scope): the text dialog hint
+  "Type here · မြန်မာလို ရေးလို့ရပါတယ်" breaks Fly's English-only UI rule ->
+  fix in a later step. Export stays solid coral until P0.3 (a gradient
+  button needs a new widget).

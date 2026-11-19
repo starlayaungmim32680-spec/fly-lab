@@ -37,6 +37,8 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'fly_catalog.dart';
+import 'studio/studio_theme.dart';
+import 'studio/studio_tokens.dart';
 
 class _Clip {
   _Clip({
@@ -279,10 +281,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     with SingleTickerProviderStateMixin {
   static const MethodChannel _ch = MethodChannel('flylab/project');
   static const double _pps = 56; // timeline pixels per second
-  static const LinearGradient _brand = LinearGradient(colors: [
-    Color(0xFFFF4B6E),
-    Color(0xFF9C4DFF),
-  ]);
+  static const LinearGradient _brand = StudioColors.aurora;
   static const List<String> _ratios = ['9:16', '1:1', '4:5', '16:9'];
   static const List<(String, Color?)> _backgrounds = [
     ('Blur', null),
@@ -507,8 +506,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     final TextEditingController tc = TextEditingController(text: initial);
     return showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C1E),
+      builder: (ctx) => Theme(
+        data: StudioTheme.dark,
+        child: AlertDialog(
+        backgroundColor: StudioColors.sheet,
         title: const Text('Text'),
         content: TextField(
           controller: tc,
@@ -524,6 +525,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               onPressed: () => Navigator.pop(ctx, tc.text.trim()),
               child: const Text('OK')),
         ],
+      ),
       ),
     );
   }
@@ -776,7 +778,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         child: Container(
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
-                              color: Colors.white10,
+                              color: StudioColors.ink2,
                               borderRadius: BorderRadius.circular(10)),
                           child: Text(e, style: const TextStyle(fontSize: 30)),
                         ),
@@ -789,7 +791,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         child: Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                              color: Colors.white10,
+                              color: StudioColors.ink2,
                               borderRadius: BorderRadius.circular(10)),
                           child: i < prev.length
                               ? Image.memory(prev[i], fit: BoxFit.contain)
@@ -1392,13 +1394,13 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             width: 14,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: StudioColors.text1,
               borderRadius: BorderRadius.horizontal(
                 left: Radius.circular(left ? 5 : 0),
                 right: Radius.circular(left ? 0 : 5),
               ),
             ),
-            child: Container(width: 2, height: 10, color: Colors.black54),
+            child: Container(width: 2, height: 10, color: StudioColors.grip),
           ),
         );
     return Positioned(
@@ -1412,10 +1414,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             sel ? (d) => _moveTx(t, d.delta.dx / _pps) : null,
         child: Container(
           decoration: BoxDecoration(
-            color: sel ? const Color(0xFFFF9F43) : const Color(0xFF9A5A1C),
+            color: sel ? StudioColors.layers : StudioColors.layersTint,
             borderRadius: BorderRadius.circular(5),
             border: Border.all(
-                color: sel ? Colors.white : Colors.transparent, width: 1.2),
+                color: sel ? StudioColors.text1 : StudioColors.layers, width: 1.2),
           ),
           child: Row(
             children: [
@@ -1428,14 +1430,16 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     _ => Icons.title,
                   },
                   size: 11,
-                  color: Colors.white),
+                  color: sel ? StudioColors.ink0 : StudioColors.text1),
               const SizedBox(width: 3),
               Expanded(
                 child: Text(_itemLabel(t),
                     maxLines: 1,
                     overflow: TextOverflow.clip,
-                    style: const TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w700)),
+                    style: sel
+                        ? StudioText.captionStrong
+                            .copyWith(color: StudioColors.ink0)
+                        : StudioText.captionStrong),
               ),
               if (sel) handle(false),
             ],
@@ -1492,9 +1496,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Text(
-              'Texts go on the orange track at the playhead · tap a text on the video or its bar to change it',
+              'Texts go on the pink track at the playhead · tap a text on the video or its bar to change it',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 10.5, color: Colors.white54)),
+              style: StudioText.hint),
         ),
       ],
     );
@@ -1511,7 +1515,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
               child: ChoiceChip(
-                label: Text(names[i], style: const TextStyle(fontSize: 12)),
+                label: Text(names[i], style: StudioText.label),
                 selected: cur == i,
                 onSelected: (_) => pick(i),
                 visualDensity: VisualDensity.compact,
@@ -1528,7 +1532,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       child: Row(
         children: [
           const SizedBox(width: 16),
-          SizedBox(width: 74, child: Text(label, style: const TextStyle(fontSize: 12))),
+          SizedBox(width: 74, child: Text(label, style: StudioText.label)),
           Expanded(
             child: ListView(
               scrollDirection: Axis.horizontal,
@@ -1544,7 +1548,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         color: Color(c),
                         shape: BoxShape.circle,
                         border: Border.all(
-                            color: cur == c ? Colors.white : Colors.white24,
+                            color: cur == c ? StudioColors.text1 : StudioColors.lineStrong,
                             width: cur == c ? 2.5 : 1),
                       ),
                     ),
@@ -1580,7 +1584,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             padding: EdgeInsets.fromLTRB(16, 2, 16, 4),
             child: Text(
                 'Screen: black parts disappear (lyric cards) · Multiply: white parts disappear',
-                style: TextStyle(fontSize: 10.5, color: Colors.white54)),
+                style: StudioText.hint),
           ),
         ]);
       case 'Frame':
@@ -1602,10 +1606,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.white10,
+                      color: StudioColors.ink2,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: t.font == i ? Colors.white : Colors.transparent,
+                          color: t.font == i ? StudioColors.text1 : Colors.transparent,
                           width: 1.5),
                     ),
                     child: Column(
@@ -1618,7 +1622,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         Text(_fontNames[i],
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 9.5)),
+                            style: StudioText.caption),
                       ],
                     ),
                   ),
@@ -1648,7 +1652,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               padding: EdgeInsets.only(left: 16, top: 2),
               child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('In', style: TextStyle(fontSize: 11, color: Colors.white54)))),
+                  child: Text('In', style: StudioText.hint))),
           _chips(_txIn, t.animIn, (i) {
             setState(() => t.animIn = i);
             _sendTexts();
@@ -1658,7 +1662,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text('While on screen',
-                      style: TextStyle(fontSize: 11, color: Colors.white54)))),
+                      style: StudioText.hint))),
           _chips(_txLoop, t.animLoop, (i) {
             setState(() => t.animLoop = i);
             _sendTexts();
@@ -1667,7 +1671,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               padding: EdgeInsets.only(left: 16),
               child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('Out', style: TextStyle(fontSize: 11, color: Colors.white54)))),
+                  child: Text('Out', style: StudioText.hint))),
           _chips(_txOut, t.animOut, (i) {
             setState(() => t.animOut = i);
             _sendTexts();
@@ -1714,8 +1718,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     '${_itemLabel(t)} · ${_fmt(t.start)} - ${_fmt(t.end)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+                    style: StudioText.heading),
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
@@ -1794,7 +1797,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     angle: sel.rot * math.pi / 180,
                     child: Container(
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.white, width: 1.4),
+                        border: Border.all(color: StudioColors.text1, width: 1.4),
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -1841,13 +1844,13 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             width: 14,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: StudioColors.text1,
               borderRadius: BorderRadius.horizontal(
                 left: Radius.circular(left ? 5 : 0),
                 right: Radius.circular(left ? 0 : 5),
               ),
             ),
-            child: Container(width: 2, height: 10, color: Colors.black54),
+            child: Container(width: 2, height: 10, color: StudioColors.grip),
           ),
         );
     return Positioned(
@@ -1867,23 +1870,27 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             sel ? (d) => _moveAu(a, d.delta.dx / _pps) : null,
         child: Container(
           decoration: BoxDecoration(
-            color: sel ? const Color(0xFF1DB954) : const Color(0xFF17703A),
+            color: sel ? StudioColors.sound : StudioColors.soundTint,
             borderRadius: BorderRadius.circular(5),
             border: Border.all(
-                color: sel ? Colors.white : Colors.transparent, width: 1.2),
+                color: sel ? StudioColors.text1 : StudioColors.sound, width: 1.2),
           ),
           child: Row(
             children: [
               if (sel) handle(true),
               const SizedBox(width: 4),
-              const Icon(Icons.music_note, size: 11, color: Colors.white),
+              Icon(Icons.music_note,
+                  size: 11,
+                  color: sel ? StudioColors.ink0 : StudioColors.text1),
               const SizedBox(width: 3),
               Expanded(
                 child: Text(a.name,
                     maxLines: 1,
                     overflow: TextOverflow.clip,
-                    style: const TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w700)),
+                    style: sel
+                        ? StudioText.captionStrong
+                            .copyWith(color: StudioColors.ink0)
+                        : StudioText.captionStrong),
               ),
               if (sel) handle(false),
             ],
@@ -1901,7 +1908,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         children: [
           const SizedBox(width: 16),
           SizedBox(
-              width: 64, child: Text(label, style: const TextStyle(fontSize: 12))),
+              width: 64, child: Text(label, style: StudioText.label)),
           Expanded(
             child: Slider(
                 value: v.clamp(min, max), min: min, max: max, onChanged: onChanged),
@@ -1909,8 +1916,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           SizedBox(
               width: 46,
               child: Text(value,
-                  style: const TextStyle(
-                      fontSize: 11.5, fontWeight: FontWeight.w700))),
+                  style: StudioText.labelStrong)),
         ],
       ),
     );
@@ -1942,9 +1948,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Text(
-              'Songs from your phone go on the green track at the playhead · tap a green bar to change it',
+              'Songs from your phone go on the amber track at the playhead · tap an amber bar to change it',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 10.5, color: Colors.white54)),
+              style: StudioText.hint),
         ),
       ],
     );
@@ -1965,8 +1971,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                 child: Text('${a.name} · ${_fmt(a.start)} - ${_fmt(a.end)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+                    style: StudioText.heading),
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
@@ -2077,10 +2082,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                               width: 52,
                               margin: const EdgeInsets.only(left: 6),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: StudioColors.text1,
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Icon(Icons.add, color: Colors.black),
+                              child: const Icon(Icons.add, color: StudioColors.ink0),
                             ),
                           ),
                         ],
@@ -2125,7 +2130,10 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               top: 0,
               bottom: 0,
               child: IgnorePointer(
-                child: Container(width: 2, color: Colors.white),
+                child: Container(
+                    width: 2,
+                    decoration: const BoxDecoration(
+                        gradient: StudioColors.auroraVertical)),
               ),
             ),
           ],
@@ -2148,13 +2156,13 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             width: 14,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: StudioColors.text1,
               borderRadius: BorderRadius.horizontal(
                 left: Radius.circular(left ? 5 : 0),
                 right: Radius.circular(left ? 0 : 5),
               ),
             ),
-            child: Container(width: 2, height: 10, color: Colors.black54),
+            child: Container(width: 2, height: 10, color: StudioColors.grip),
           ),
         );
     return Positioned(
@@ -2174,24 +2182,27 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             sel ? (d) => _moveFx(f, d.delta.dx / _pps) : null,
         child: Container(
           decoration: BoxDecoration(
-            color: sel ? const Color(0xFF9C4DFF) : const Color(0xFF5B3A8C),
+            color: sel ? StudioColors.magic : StudioColors.magicTint,
             borderRadius: BorderRadius.circular(5),
             border: Border.all(
-                color: sel ? Colors.white : Colors.transparent, width: 1.2),
+                color: sel ? StudioColors.text1 : StudioColors.magic, width: 1.2),
           ),
           child: Row(
             children: [
               if (sel) handle(true),
               const SizedBox(width: 4),
               Icon(f.placed ? Icons.my_location : Icons.auto_awesome,
-                  size: 11, color: Colors.white),
+                  size: 11,
+                  color: sel ? StudioColors.ink0 : StudioColors.text1),
               const SizedBox(width: 3),
               Expanded(
                 child: Text(flyLabel(f.id),
                     maxLines: 1,
                     overflow: TextOverflow.clip,
-                    style: const TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w700)),
+                    style: sel
+                        ? StudioText.captionStrong
+                            .copyWith(color: StudioColors.ink0)
+                        : StudioText.captionStrong),
               ),
               if (sel) handle(false),
             ],
@@ -2257,7 +2268,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-              color: sel ? Colors.white : Colors.transparent, width: 2),
+              color: sel ? StudioColors.text1 : Colors.transparent, width: 2),
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(4),
@@ -2278,10 +2289,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                   '${c.template == 'plain' ? '' : ' · ${flyLabel(c.template)}'}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      shadows: [Shadow(blurRadius: 3)]),
+                  style: StudioText.captionStrong
+                      .copyWith(shadows: const [Shadow(blurRadius: 3)]),
                 ),
               ),
             ],
@@ -2300,10 +2309,12 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 24, color: active ? const Color(0xFFFF7EB6) : null),
+            Icon(icon,
+                size: 24,
+                color: active ? StudioColors.focus : StudioColors.text1),
             const SizedBox(height: 4),
             Text(label,
-                style: const TextStyle(fontSize: 11.5),
+                style: StudioText.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis),
           ],
@@ -2352,8 +2363,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           const SizedBox(width: 16),
           Expanded(
             child: Text(title,
-                style: const TextStyle(
-                    fontSize: 13.5, fontWeight: FontWeight.w800)),
+                style: StudioText.heading),
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
@@ -2379,11 +2389,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 9),
                 child: Center(
                   child: Text(c,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              cur == c ? FontWeight.w800 : FontWeight.w500,
-                          color: cur == c ? Colors.white : Colors.white54)),
+                      style: cur == c ? StudioText.tabOn : StudioText.tabOff),
                 ),
               ),
             ),
@@ -2418,7 +2424,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                       borderRadius: BorderRadius.circular(8),
                       child: img == null || img.isEmpty
                           ? Container(
-                              color: Colors.white10,
+                              color: StudioColors.ink2,
                               alignment: Alignment.center,
                               child: const SizedBox(
                                 width: 14,
@@ -2441,9 +2447,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                           decoration: const BoxDecoration(
                               shape: BoxShape.circle, gradient: _brand),
                           child: Text('$badge',
-                              style: const TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800)),
+                              style: StudioText.captionStrong),
                         ),
                       ),
                   ],
@@ -2453,10 +2457,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               Text(t.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: sel ? FontWeight.w800 : FontWeight.w500,
-                      color: sel ? Colors.white : Colors.white70)),
+                  style: sel ? StudioText.cardOn : StudioText.cardOff),
             ],
           ),
         ),
@@ -2554,7 +2555,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                 SizedBox(
                     width: 44,
                     child: Text('${c.dur.toStringAsFixed(1)}s',
-                        style: const TextStyle(fontWeight: FontWeight.w800))),
+                        style: StudioText.labelStrong)),
                 Expanded(
                   child: Slider(
                     value: c.dur.clamp(0.5, c.maxDur),
@@ -2591,8 +2592,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               Expanded(
                 child: Text(
                     c == null ? 'Templates' : 'Template · clip ${_clips.indexOf(c) + 1}',
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+                    style: StudioText.heading),
               ),
               TextButton(
                 onPressed: c == null
@@ -2640,8 +2640,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         : 'Effects · tap one to add at the playhead',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+                    style: StudioText.heading),
               ),
               _cardSource(),
               IconButton(
@@ -2688,10 +2687,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             gradient: on ? _brand : null,
           ),
           child: Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: on ? FontWeight.w800 : FontWeight.w500,
-                  color: on ? Colors.white : Colors.white60)),
+              style: on ? StudioText.cardOn : StudioText.cardOff),
         ),
       );
     }
@@ -2700,7 +2696,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: Colors.white10,
+        color: StudioColors.ink2,
       ),
       child: Row(children: [chip('Sample', true), chip('My clip', false)]),
     );
@@ -2722,8 +2718,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     '${flyLabel(f.id)} · ${_fmt(f.start)} - ${_fmt(f.end)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+                    style: StudioText.heading),
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
@@ -2774,7 +2769,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                 const SizedBox(width: 16),
                 const SizedBox(
                     width: 50,
-                    child: Text('Size', style: TextStyle(fontSize: 12))),
+                    child: Text('Size', style: StudioText.label)),
                 Expanded(
                   child: Slider(
                     value: f.r.clamp(0.08, _isWindow(f.id) ? 0.5 : 0.9),
@@ -2794,7 +2789,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           child: Text(
               'Drag the bar on the timeline to move it · drag its ends to make it longer or shorter',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 10.5, color: Colors.white54)),
+              style: StudioText.hint),
         ),
       ],
     );
@@ -2816,7 +2811,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             const SizedBox(width: 16),
             SizedBox(
                 width: 80,
-                child: Text(label, style: const TextStyle(fontSize: 12))),
+                child: Text(label, style: StudioText.label)),
             Expanded(
               child: Slider(
                   value: a[i].clamp(min, max),
@@ -2857,14 +2852,14 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                               color: flyFilters[i].$2,
                               border: Border.all(
                                   color: a[6].round() == i
-                                      ? Colors.white
+                                      ? StudioColors.text1
                                       : Colors.transparent,
                                   width: 2.5),
                             ),
                           ),
                           const SizedBox(height: 4),
                           Text(flyFilters[i].$1,
-                              style: const TextStyle(fontSize: 11)),
+                              style: StudioText.caption),
                         ],
                       ),
                     ),
@@ -2888,8 +2883,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               const SizedBox(width: 16),
               const Expanded(
                 child: Text('Adjust',
-                    style: TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w800)),
+                    style: StudioText.heading),
               ),
               TextButton(
                 onPressed: () {
@@ -3009,11 +3003,11 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                           height: 46,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: _backgrounds[i].$2 ?? Colors.white24,
+                            color: _backgrounds[i].$2 ?? StudioColors.lineStrong,
                             border: Border.all(
                                 color: _fit && _bg == i
-                                    ? const Color(0xFFFF7EB6)
-                                    : Colors.white24,
+                                    ? StudioColors.focus
+                                    : StudioColors.lineStrong,
                                 width: 2.5),
                           ),
                           child: _backgrounds[i].$2 == null
@@ -3022,7 +3016,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                         ),
                         const SizedBox(height: 4),
                         Text(_backgrounds[i].$1,
-                            style: const TextStyle(fontSize: 11)),
+                            style: StudioText.caption),
                       ],
                     ),
                   ),
@@ -3104,11 +3098,11 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     shape: win && st != 3 ? BoxShape.rectangle : BoxShape.circle,
                     borderRadius:
                         win && st != 3 ? BorderRadius.circular(10) : null,
-                    border: Border.all(color: Colors.white70, width: 1.5),
+                    border: Border.all(color: StudioColors.text2, width: 1.5),
                   ),
                   alignment: Alignment.center,
                   child: const Icon(Icons.open_with,
-                      size: 18, color: Colors.white70),
+                      size: 18, color: StudioColors.text2),
                 ),
               ),
             ),
@@ -3121,10 +3115,12 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   @override
   Widget build(BuildContext context) {
     final int? tex = _textureId;
-    return Scaffold(
-      backgroundColor: Colors.black,
+    return Theme(
+      data: StudioTheme.dark,
+      child: Scaffold(
+      backgroundColor: StudioColors.ink0,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: StudioColors.ink0,
         title: const Text('New Project'),
         actions: [
           Padding(
@@ -3133,8 +3129,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               onPressed: _clips.isEmpty || _exporting ? null : _export,
               style: FilledButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                backgroundColor: const Color(0xFFFF4B6E),
-                foregroundColor: Colors.white,
+                backgroundColor: StudioColors.coral,
+                foregroundColor: StudioColors.text1,
               ),
               child: Text(_exporting ? 'Saving...' : 'Export'),
             ),
@@ -3185,7 +3181,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     valueListenable: _time,
                     builder: (context, t, _) => Text(
                         '${_fmt(t)} / ${_fmt(_total)}',
-                        style: const TextStyle(fontSize: 12.5)),
+                        style: StudioText.timecode),
                   ),
                 ),
                 IconButton(
@@ -3208,7 +3204,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                     child: Text(s,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 11.5)),
+                        style: StudioText.status),
                   ),
           ),
           if (_exporting)
@@ -3219,13 +3215,14 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                 builder: (context, p, _) => LinearProgressIndicator(value: p),
               ),
             ),
-          const Divider(height: 10, color: Colors.white12),
+          const Divider(height: 10, color: StudioColors.line),
           AnimatedSize(
             duration: const Duration(milliseconds: 160),
             child: _bottom(),
           ),
           SizedBox(height: MediaQuery.paddingOf(context).bottom + 6),
         ],
+      ),
       ),
     );
   }
