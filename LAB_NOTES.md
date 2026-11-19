@@ -472,3 +472,6 @@ a Pixel 6) 6. Face AR stickers 7. Merge into Fly Dev -> prod.
 - STUDIO_ROADMAP.md has the originality checklist (what in the lab looks
   too familiar), original UX ideas and Phases 0-5. Nothing new is built
   until Ko says go.
+- 19 Nov 2026: Phase 0 design PROPOSED (PHASE0_DESIGN.md: audit, Fly Studio
+  Night tokens, icons/buttons, workspace zones, screens, sizes, Fly names,
+  feature map, component tree, plan P0.1-P0.7). No code until Ko approves.

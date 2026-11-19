@@ -16,7 +16,7 @@ Fly Video Editor must have its **own original identity**.
 Fly Creative Studio must be:
 
 1. **Easier for beginners** - a first video in under a minute, no editing
-   words needed, Burmese first.
+   words needed, Myanmar content first-class.
 2. **Powerful for advanced creators** - full timeline, precise control,
    nothing hidden for good.
 3. **Visually unique** - Fly's own look, colours, icons and motion.
@@ -99,7 +99,8 @@ covers the video; texts and stickers are nudged out of those areas.
 
 ### 4.8 Myanmar first
 Unicode Myanmar fonts (done), Zawgyi detection with one-tap convert while
-typing, Burmese UI, Burmese captions on the phone later, and seasonal
+typing, Burmese captions on the phone later (app UI text itself stays
+English - Fly rule), and seasonal
 packs drawn by us: Thingyan water, Thadingyut lights, Tazaungdaing
 lanterns.
 
@@ -135,3 +136,6 @@ living preview loops on effect cards, gentle haptics on snaps.
   issue #253 check, privacy text for on-device processing.
 
 Order inside a phase is decided with Ko. Nothing is built until Ko says go.
+
+Phase 0 proposal (19 Nov 2026): PHASE0_DESIGN.md + the "Fly Creative
+Studio - Phase 0 design" canvas. Waiting for Ko's approval.
