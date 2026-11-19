@@ -11,6 +11,9 @@
 // under a fixed white playhead, and a bottom toolbar (Edit, Templates,
 // Effects, Filters, Adjust, Ratio, Background, Add). A tool opens its
 // panel in place of the toolbar; the tick closes it.
+// E4 Stickers + Overlay (19 Nov 2026): Stickers (48 emoji + 16 shapes
+// drawn by the engine) and Overlay (a photo from the phone; frames None /
+// Border / Rounded / Circle) are items on the same track as texts.
 // E3 Text (19 Nov 2026): Text tool - words in Myanmar or English (11 fonts
 // in assets/fonts, OFL), 6 styles, colours, animations in / loop / out;
 // orange bars on a text track; on the video: drag, pinch, twist.
@@ -142,8 +145,19 @@ class _Audio {
 /// layout (Myanmar shaped right). [x], [y] = centre (0..1 from the
 /// top-left), [scale] 1 = 96 px letters on a 1280-high frame, [rot] degrees.
 class _Txt {
-  _Txt({required this.uid, required this.text, required this.start, required this.end});
+  _Txt({
+    required this.uid,
+    required this.text,
+    required this.start,
+    required this.end,
+    this.kind = 0,
+    this.path = '',
+  });
   final int uid;
+
+  /// E4: 0 text, 1 emoji, 2 drawn sticker ([text] = its name), 3 photo.
+  final int kind;
+  final String path;
   String text;
   double start;
   double end;
@@ -161,7 +175,8 @@ class _Txt {
   double bw = 0; // the engine's bitmap size (for the box on the video)
   double bh = 0;
 
-  _Txt copy(int newUid) => _Txt(uid: newUid, text: text, start: start, end: end)
+  _Txt copy(int newUid) => _Txt(
+      uid: newUid, text: text, start: start, end: end, kind: kind, path: path)
     ..x = x
     ..y = (y + 0.08).clamp(0.0, 1.0)
     ..scale = scale
@@ -192,8 +207,30 @@ class _Txt {
         'animIn': animIn,
         'animLoop': animLoop,
         'animOut': animOut,
+        'kind': kind,
+        'path': path,
       };
 }
+
+/// E4 stickers: emoji (drawn by the phone's emoji font) and shapes drawn by
+/// the engine (Stickers.NAMES in ProjectText.kt - same order).
+const List<String> _emojis = [
+  '❤️', '😍', '🥰', '😘', '😂', '🤣', '😎', '🥺', '😭', '😡', '😱', '🤔',
+  '👍', '👏', '🙏', '💪', '🔥', '✨', '⭐', '🌟', '💯', '🎉', '🎂', '🎁',
+  '🌸', '🌹', '🌈', '☀️', '🌙', '⚡', '💖', '💕', '💔', '💋', '👀', '🍀',
+  '🦋', '🐶', '🐱', '🍕', '☕', '🎵', '📸', '✈️', '🏆', '👑', '💎', '🇲🇲',
+];
+const List<String> _shapeNames = [
+  'heart', 'star', 'sparkle', 'arrow', 'ring', 'bubble', 'crown', 'bolt',
+  'cloud', 'badge_new', 'badge_love', 'badge_wow', 'badge_omg', 'badge_sale',
+  'check', 'pin',
+];
+const List<int> _shapeColors = [
+  0xFFFF3B5C, 0xFFFFC93C, 0xFFFFF3A0, 0xFFFF9F43, 0xFFFF9F43, 0xFFFFFFFF,
+  0xFFFFC93C, 0xFFFFC93C, 0xFFFFFFFF, 0xFF2ED573, 0xFFFF3B5C, 0xFFFFC93C,
+  0xFFA55EEA, 0xFFFF3B5C, 0xFF2ED573, 0xFFFF3B5C,
+];
+const List<String> _photoFrames = ['None', 'Border', 'Rounded', 'Circle'];
 
 const List<String> _fontNames = [
   'Default', 'Padauk', 'Padauk Bold', 'Noto Sans', 'Noto Black',
@@ -218,6 +255,7 @@ enum _Panel {
   audioEdit,
   text,
   textEdit,
+  stickers,
   fxEdit,
   templates,
   effects,
@@ -274,6 +312,8 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   int? _txSel; // the text being edited
   int _txTab = 0; // Edit, Font, Style, Color, Animation
   List<Uint8List>? _fontPrev;
+  List<Uint8List>? _stickerPrev;
+  int _stickerTab = 0; // Emoji, Shapes
   bool _txBusy = false;
   bool _txAgain = false;
   double _s0 = 1;
@@ -569,6 +609,131 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _txSel = c.uid;
     });
     _sendTexts();
+  }
+
+  /// Puts a sticker / photo item on the video at the playhead (like text).
+  void _addItem(_Txt t) {
+    setState(() {
+      _texts.add(t);
+      _txSel = t.uid;
+      _sel = null;
+      _fxSel = null;
+      _auSel = null;
+      _txTab = 0;
+      _panel = _Panel.textEdit;
+    });
+    _sendTexts();
+    _measure(t);
+  }
+
+  (double, double) _slot() {
+    final double tot = _total;
+    double start = _time.value.clamp(0.0, tot);
+    double end = math.min(start + 3, tot);
+    if (end - start < 0.5) {
+      start = math.max(0.0, tot - 3);
+      end = tot;
+    }
+    return (start, end);
+  }
+
+  void _addEmoji(String e) {
+    if (_clips.isEmpty) return;
+    final (double a, double b) = _slot();
+    _addItem(_Txt(uid: _nextTx++, text: e, start: a, end: b, kind: 1)
+      ..font = 0
+      ..scale = 2
+      ..animIn = 2
+      ..animLoop = 1);
+  }
+
+  void _addShape(int i) {
+    if (_clips.isEmpty) return;
+    final (double a, double b) = _slot();
+    _addItem(
+        _Txt(uid: _nextTx++, text: _shapeNames[i], start: a, end: b, kind: 2)
+          ..color = _shapeColors[i]
+          ..color2 = 0xFFFFFFFF
+          ..scale = 0.8
+          ..animIn = 2);
+  }
+
+  /// Overlay: a photo from the phone on top of the video.
+  Future<void> _addOverlay() async {
+    if (_clips.isEmpty) return;
+    final XFile? f = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (!mounted || f == null) return;
+    final (double a, double b) = _slot();
+    _addItem(_Txt(uid: _nextTx++, text: 'Photo', start: a, end: b, kind: 3, path: f.path)
+      ..scale = 0.5
+      ..style = 2
+      ..color2 = 0xFFFFFFFF
+      ..animIn = 2);
+  }
+
+  Future<void> _loadStickers() async {
+    if (_stickerPrev != null) return;
+    _stickerPrev = const [];
+    try {
+      final List<dynamic>? r =
+          await _ch.invokeListMethod<dynamic>('stickerPreviews');
+      if (!mounted || r == null) return;
+      setState(() => _stickerPrev = [for (final dynamic b in r) b as Uint8List]);
+    } catch (_) {
+      _stickerPrev = null;
+    }
+  }
+
+  /// Stickers: emoji or drawn shapes; tap one to put it on the video.
+  Widget _stickersPanel() {
+    _loadStickers();
+    final List<Uint8List> prev = _stickerPrev ?? const [];
+    return Column(
+      children: [
+        _panelHeader('Stickers'),
+        _catRow(const ['Emoji', 'Shapes'], _stickerTab == 0 ? 'Emoji' : 'Shapes',
+            (v) => setState(() => _stickerTab = v == 'Emoji' ? 0 : 1)),
+        SizedBox(
+          height: 128,
+          child: GridView.count(
+            crossAxisCount: 2,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            mainAxisSpacing: 6,
+            crossAxisSpacing: 6,
+            children: _stickerTab == 0
+                ? [
+                    for (final String e in _emojis)
+                      GestureDetector(
+                        onTap: () => _addEmoji(e),
+                        child: Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                              color: Colors.white10,
+                              borderRadius: BorderRadius.circular(10)),
+                          child: Text(e, style: const TextStyle(fontSize: 30)),
+                        ),
+                      ),
+                  ]
+                : [
+                    for (int i = 0; i < _shapeNames.length; i++)
+                      GestureDetector(
+                        onTap: () => _addShape(i),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                              color: Colors.white10,
+                              borderRadius: BorderRadius.circular(10)),
+                          child: i < prev.length
+                              ? Image.memory(prev[i], fit: BoxFit.contain)
+                              : const SizedBox(),
+                        ),
+                      ),
+                  ],
+          ),
+        ),
+      ],
+    );
   }
 
   // ------------------------------------------------------------ audio
@@ -1173,10 +1338,17 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             children: [
               if (sel) handle(true),
               const SizedBox(width: 4),
-              const Icon(Icons.title, size: 11, color: Colors.white),
+              Icon(
+                  switch (t.kind) {
+                    1 || 2 => Icons.emoji_emotions_outlined,
+                    3 => Icons.image_outlined,
+                    _ => Icons.title,
+                  },
+                  size: 11,
+                  color: Colors.white),
               const SizedBox(width: 3),
               Expanded(
-                child: Text(t.text.replaceAll('\n', ' '),
+                child: Text(_itemLabel(t),
                     maxLines: 1,
                     overflow: TextOverflow.clip,
                     style: const TextStyle(
@@ -1189,6 +1361,12 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       ),
     );
   }
+
+  String _itemLabel(_Txt t) => switch (t.kind) {
+        2 => t.text.replaceAll('badge_', '').toUpperCase(),
+        3 => 'Photo',
+        _ => t.text.replaceAll('\n', ' '),
+      };
 
   void _selectTx(_Txt? t) {
     setState(() {
@@ -1288,10 +1466,18 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
   Widget _textEditPanel() {
     final _Txt? t = _selTx;
     if (t == null) return _textPanel();
-    const List<String> tabs = ['Edit', 'Font', 'Style', 'Color', 'Animation'];
+    final List<String> tabs = switch (t.kind) {
+      1 => const ['Edit', 'Animation'],
+      2 => const ['Edit', 'Color', 'Animation'],
+      3 => const ['Edit', 'Frame', 'Color', 'Animation'],
+      _ => const ['Edit', 'Font', 'Style', 'Color', 'Animation'],
+    };
+    final String tab = tabs[_txTab.clamp(0, tabs.length - 1)];
     Widget body;
-    switch (_txTab) {
-      case 1:
+    switch (tab) {
+      case 'Frame':
+        body = _chips(_photoFrames, t.style, (i) => _restyle(t, () => t.style = i));
+      case 'Font':
         _loadFonts();
         final List<Uint8List> prev = _fontPrev ?? const [];
         body = SizedBox(
@@ -1332,15 +1518,23 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             ],
           ),
         );
-      case 2:
+      case 'Style':
         body = _chips(_txStyles, t.style, (i) => _restyle(t, () => t.style = i));
-      case 3:
+      case 'Color':
         body = Column(children: [
-          _colorRow('Text', t.color, (c) => _restyle(t, () => t.color = c)),
-          _colorRow(t.style == 2 ? 'Box' : 'Outline / 2nd', t.color2,
+          if (t.kind != 3)
+            _colorRow(t.kind == 2 ? 'Color' : 'Text', t.color,
+                (c) => _restyle(t, () => t.color = c)),
+          _colorRow(
+              t.kind == 3
+                  ? 'Frame'
+                  : t.kind == 2
+                      ? 'Rim'
+                      : (t.style == 2 ? 'Box' : 'Outline / 2nd'),
+              t.color2,
               (c) => _restyle(t, () => t.color2 = c)),
         ]);
-      case 4:
+      case 'Animation':
         body = Column(children: [
           const Padding(
               padding: EdgeInsets.only(left: 16, top: 2),
@@ -1378,7 +1572,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 6),
             children: [
-              _tool(Icons.edit, 'Edit text', () => _editText(t)),
+              if (t.kind == 0) _tool(Icons.edit, 'Edit text', () => _editText(t)),
               _tool(Icons.copy_outlined, 'Duplicate', _duplicateTx),
               _tool(Icons.straighten, 'Whole video', () {
                 setState(() {
@@ -1409,7 +1603,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
-                    '${t.text.replaceAll('\n', ' ')} · ${_fmt(t.start)} - ${_fmt(t.end)}',
+                    '${_itemLabel(t)} · ${_fmt(t.start)} - ${_fmt(t.end)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1423,7 +1617,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             ],
           ),
         ),
-        _catRow(tabs, tabs[_txTab], (v) => setState(() => _txTab = tabs.indexOf(v))),
+        _catRow(tabs, tab, (v) => setState(() => _txTab = tabs.indexOf(v))),
         body,
         const SizedBox(height: 4),
       ],
@@ -1462,7 +1656,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
             _selectTx(null);
           }
         },
-        onDoubleTap: sel == null ? null : () => _editText(sel),
+        onDoubleTap: sel == null || sel.kind != 0 ? null : () => _editText(sel),
         onScaleStart: sel == null
             ? null
             : (_) {
@@ -2021,7 +2215,12 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _tool(Icons.music_note, 'Audio', () => _open(_Panel.audio),
               active: _music.isNotEmpty || !_origOn),
           _tool(Icons.title, 'Text', () => _open(_Panel.text),
-              active: _texts.isNotEmpty),
+              active: _texts.any((t) => t.kind == 0)),
+          _tool(Icons.emoji_emotions_outlined, 'Stickers',
+              () => _open(_Panel.stickers),
+              active: _texts.any((t) => t.kind == 1 || t.kind == 2)),
+          _tool(Icons.add_photo_alternate_outlined, 'Overlay', _addOverlay,
+              active: _texts.any((t) => t.kind == 3)),
           _tool(Icons.auto_awesome_motion, 'Templates',
               () => _open(_Panel.templates)),
           _tool(Icons.auto_awesome, 'Effects', () => _open(_Panel.effects),
@@ -2738,6 +2937,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
       _Panel.audioEdit => _audioEditPanel(),
       _Panel.text => _textPanel(),
       _Panel.textEdit => _textEditPanel(),
+      _Panel.stickers => _stickersPanel(),
       _Panel.templates => _templatesPanel(),
       _Panel.effects => _effectsPanel(),
       _Panel.filters => _filtersPanel(),
@@ -2848,6 +3048,7 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                               if (_texts.isNotEmpty &&
                                   (_panel == _Panel.none ||
                                       _panel == _Panel.text ||
+                                      _panel == _Panel.stickers ||
                                       _panel == _Panel.textEdit))
                                 _textOverlay(),
                             ],

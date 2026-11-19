@@ -19,6 +19,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
+import android.graphics.Path
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
@@ -45,9 +46,11 @@ class TItem(
     val x: Float, val y: Float, val scale: Float, val rot: Float,
     val font: Int, val style: Int, val color: Int, val color2: Int,
     val animIn: Int, val animLoop: Int, val animOut: Int,
+    /** E4: 0 text, 1 emoji, 2 drawn sticker (text = its name), 3 photo (path). */
+    val kind: Int = 0, val path: String = "",
 ) {
-    /** Everything that changes the picture of the words (not where they are). */
-    val key: String get() = "$font|$style|$color|$color2|$text"
+    /** Everything that changes the picture (not where it is). */
+    val key: String get() = "$kind|$font|$style|$color|$color2|$path|$text"
 
     companion object {
         fun parse(mp: Map<String, Any>): TItem? {
@@ -57,7 +60,8 @@ class TItem(
             return TItem(i("uid", 0), text, f("start", 0f), f("end", 3f),
                 f("x", 0.5f), f("y", 0.5f), f("scale", 1f).coerceIn(0.1f, 6f), f("rot", 0f),
                 i("font", 0), i("style", 0), i("color", -1), i("color2", 0xFF000000.toInt()),
-                i("animIn", 0), i("animLoop", 0), i("animOut", 0))
+                i("animIn", 0), i("animLoop", 0), i("animOut", 0),
+                i("kind", 0), mp["path"] as? String ?: "")
         }
 
         fun parseAll(list: List<Map<String, Any>>?): List<TItem> = list?.mapNotNull { parse(it) } ?: emptyList()
@@ -101,8 +105,49 @@ object TextArt {
             .build()
     }
 
+    /** The picture of an item: words, emoji, a drawn sticker or a photo. */
+    fun render(t: TItem): Bitmap = when (t.kind) {
+        2 -> Stickers.draw(t.text, t.color, t.color2)
+        3 -> photo(t)
+        else -> words(t)
+    }
+
+    /** E4 overlay photo with a frame: 0 none, 1 border, 2 round corners, 3 circle. */
+    private fun photo(t: TItem): Bitmap {
+        val src = LabImages.decodeUpright(t.path, 1024)
+        val w = src.width
+        val h = src.height
+        val out = Bitmap.createBitmap(w + 40, h + 40, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val r = RectF(20f, 20f, 20f + w, 20f + h)
+        when (t.style) {
+            1 -> {
+                val bp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = t.color2 }
+                c.drawRect(RectF(4f, 4f, w + 36f, h + 36f), bp)
+                c.drawBitmap(src, null, r, p)
+            }
+            2, 3 -> {
+                val rad = if (t.style == 3) min(w, h) / 2f else min(w, h) * 0.12f
+                val rr = if (t.style == 3) {
+                    val d = min(w, h).toFloat()
+                    RectF(20f + (w - d) / 2f, 20f + (h - d) / 2f, 20f + (w + d) / 2f, 20f + (h + d) / 2f)
+                } else r
+                val bp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = t.color2 }
+                c.drawRoundRect(RectF(rr.left - 10f, rr.top - 10f, rr.right + 10f, rr.bottom + 10f),
+                    rad + 10f, rad + 10f, bp)
+                p.shader = android.graphics.BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+                    .apply { setLocalMatrix(android.graphics.Matrix().apply { setTranslate(20f, 20f) }) }
+                c.drawRoundRect(rr, rad, rad, p)
+            }
+            else -> c.drawBitmap(src, null, r, p)
+        }
+        src.recycle()
+        return out
+    }
+
     /** The words drawn in their style; transparent around them. */
-    fun render(t: TItem): Bitmap {
+    private fun words(t: TItem): Bitmap {
         val p = TextPaint(Paint.ANTI_ALIAS_FLAG)
         p.typeface = typeface(t.font)
         p.textSize = SIZE
@@ -185,6 +230,16 @@ object TextArt {
     }
 
     /** Small "မြန်မာ Aa" cards, one per font, for the font picker. */
+    /** Small cards of the drawn stickers, for the sticker picker. */
+    fun stickerPreviews(): List<ByteArray> = Stickers.NAMES.map { n ->
+        val bm = Stickers.draw(n, Stickers.defaultColor(n), Color.WHITE)
+        val bos = ByteArrayOutputStream()
+        Bitmap.createScaledBitmap(bm, bm.width / 2, bm.height / 2, true)
+            .compress(Bitmap.CompressFormat.PNG, 100, bos)
+        bm.recycle()
+        bos.toByteArray()
+    }
+
     fun previews(): List<ByteArray> = FONTS.indices.map { i ->
         val bm = render(TItem(0, "မြန်မာ Aa", 0f, 1f, 0.5f, 0.5f, 1f, 0f, i, 0,
             Color.WHITE, Color.BLACK, 0, 0, 0))
@@ -355,5 +410,144 @@ void main() {
         cache.clear()
         if (prog != 0) GLES20.glDeleteProgram(prog)
         prog = 0
+    }
+}
+
+/** E4 drawn stickers: shapes made here (no image files, no licences). */
+object Stickers {
+    val NAMES = listOf(
+        "heart", "star", "sparkle", "arrow", "ring", "bubble", "crown", "bolt",
+        "cloud", "badge_new", "badge_love", "badge_wow", "badge_omg", "badge_sale",
+        "check", "pin",
+    )
+
+    fun defaultColor(n: String): Int = when (n) {
+        "heart", "badge_love", "pin" -> 0xFFFF3B5C.toInt()
+        "star", "crown", "bolt", "badge_wow" -> 0xFFFFC93C.toInt()
+        "sparkle" -> 0xFFFFF3A0.toInt()
+        "arrow", "ring" -> 0xFFFF9F43.toInt()
+        "bubble", "cloud" -> 0xFFFFFFFF.toInt()
+        "badge_new", "check" -> 0xFF2ED573.toInt()
+        "badge_omg" -> 0xFFA55EEA.toInt()
+        "badge_sale" -> 0xFFFF3B5C.toInt()
+        else -> 0xFFFFFFFF.toInt()
+    }
+
+    private fun star(cx: Float, cy: Float, ro: Float, ri: Float, n: Int): Path {
+        val p = Path()
+        for (k in 0 until n * 2) {
+            val r = if (k % 2 == 0) ro else ri
+            val a = -Math.PI / 2 + k * Math.PI / n
+            val x = cx + (r * cos(a)).toFloat()
+            val y = cy + (r * sin(a)).toFloat()
+            if (k == 0) p.moveTo(x, y) else p.lineTo(x, y)
+        }
+        p.close()
+        return p
+    }
+
+    /** One sticker: filled with col, a white rim and a soft shadow. */
+    fun draw(name: String, col: Int, rim: Int): Bitmap {
+        val badge = name.startsWith("badge_")
+        val w = if (badge) 460 else 320
+        val h = if (badge) 220 else 320
+        val bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bm)
+        val cx = w / 2f
+        val cy = h / 2f
+        val path = Path()
+        var stroke = false
+        when (name) {
+            "heart" -> {
+                path.moveTo(cx, 268f)
+                path.cubicTo(20f, 160f, 40f, 40f, cx - 70f, 52f)
+                path.cubicTo(cx - 30f, 56f, cx, 90f, cx, 110f)
+                path.cubicTo(cx, 90f, cx + 30f, 56f, cx + 70f, 52f)
+                path.cubicTo(w - 40f, 40f, w - 20f, 160f, cx, 268f)
+                path.close()
+            }
+            "star" -> path.addPath(star(cx, cy + 10f, 140f, 60f, 5))
+            "sparkle" -> path.addPath(star(cx, cy, 140f, 34f, 4))
+            "arrow" -> {
+                path.moveTo(30f, 130f); path.lineTo(180f, 130f); path.lineTo(180f, 60f)
+                path.lineTo(295f, 160f); path.lineTo(180f, 260f); path.lineTo(180f, 190f)
+                path.lineTo(30f, 190f); path.close()
+            }
+            "ring" -> { path.addCircle(cx, cy, 115f, Path.Direction.CW); stroke = true }
+            "bubble" -> {
+                path.addRoundRect(RectF(24f, 40f, 296f, 220f), 60f, 60f, Path.Direction.CW)
+                val tail = Path()
+                tail.moveTo(80f, 200f); tail.lineTo(60f, 290f); tail.lineTo(150f, 210f); tail.close()
+                path.op(tail, Path.Op.UNION)
+            }
+            "crown" -> {
+                path.moveTo(40f, 250f); path.lineTo(40f, 90f); path.lineTo(105f, 160f)
+                path.lineTo(cx, 60f); path.lineTo(215f, 160f); path.lineTo(280f, 90f)
+                path.lineTo(280f, 250f); path.close()
+            }
+            "bolt" -> {
+                path.moveTo(190f, 20f); path.lineTo(70f, 180f); path.lineTo(150f, 180f)
+                path.lineTo(120f, 300f); path.lineTo(250f, 130f); path.lineTo(170f, 130f); path.close()
+            }
+            "cloud" -> {
+                path.addCircle(110f, 180f, 70f, Path.Direction.CW)
+                path.op(Path().apply { addCircle(180f, 140f, 85f, Path.Direction.CW) }, Path.Op.UNION)
+                path.op(Path().apply { addCircle(240f, 190f, 60f, Path.Direction.CW) }, Path.Op.UNION)
+                path.op(Path().apply { addRoundRect(RectF(60f, 180f, 280f, 250f), 35f, 35f, Path.Direction.CW) }, Path.Op.UNION)
+            }
+            "check" -> {
+                path.moveTo(50f, 170f); path.lineTo(120f, 240f); path.lineTo(275f, 80f)
+                stroke = true
+            }
+            "pin" -> {
+                path.addCircle(cx, 130f, 95f, Path.Direction.CW)
+                val tip = Path()
+                tip.moveTo(cx - 70f, 190f); tip.lineTo(cx, 300f); tip.lineTo(cx + 70f, 190f); tip.close()
+                path.op(tip, Path.Op.UNION)
+                path.op(Path().apply { addCircle(cx, 130f, 38f, Path.Direction.CW) }, Path.Op.DIFFERENCE)
+            }
+            else -> path.addRoundRect(RectF(20f, 30f, w - 20f, h - 30f), 70f, 70f, Path.Direction.CW)
+        }
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.strokeJoin = Paint.Join.ROUND
+        p.strokeCap = Paint.Cap.ROUND
+        if (stroke) {
+            p.style = Paint.Style.STROKE
+            p.color = rim
+            p.strokeWidth = 56f
+            p.setShadowLayer(12f, 0f, 5f, 0x66000000)
+            c.drawPath(path, p)
+            p.clearShadowLayer()
+            p.strokeWidth = 34f
+            p.color = col
+            c.drawPath(path, p)
+        } else {
+            p.style = Paint.Style.STROKE
+            p.color = rim
+            p.strokeWidth = 18f
+            p.setShadowLayer(12f, 0f, 5f, 0x66000000)
+            c.drawPath(path, p)
+            p.clearShadowLayer()
+            p.style = Paint.Style.FILL
+            p.color = col
+            c.drawPath(path, p)
+            // a little shine on top
+            p.color = 0x40FFFFFF
+            c.save()
+            c.clipPath(path)
+            c.drawOval(RectF(cx - w * 0.3f, h * 0.08f, cx + w * 0.15f, h * 0.36f), p)
+            c.restore()
+        }
+        if (badge) {
+            val tp = TextPaint(Paint.ANTI_ALIAS_FLAG)
+            tp.typeface = TextArt.typeface(11)
+            tp.textSize = 120f
+            tp.color = if (col == 0xFFFFFFFF.toInt()) Color.BLACK else Color.WHITE
+            tp.textAlign = Paint.Align.CENTER
+            val word = name.removePrefix("badge_").uppercase()
+            val fm = tp.fontMetrics
+            c.drawText(word, cx, cy - (fm.ascent + fm.descent) / 2f, tp)
+        }
+        return bm
     }
 }

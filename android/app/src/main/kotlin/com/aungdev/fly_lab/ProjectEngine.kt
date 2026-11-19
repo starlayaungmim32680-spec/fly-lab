@@ -574,6 +574,10 @@ class ProjectEngine(
                     main.post { result.success(sz?.let { listOf(it.first, it.second) }) }
                 }.start()
             }
+            "stickerPreviews" -> Thread {
+                val out = try { TextArt.stickerPreviews() } catch (e: Throwable) { emptyList() }
+                main.post { result.success(out) }
+            }.start()
             "fontPreviews" -> Thread {
                 val out = try { TextArt.previews() } catch (e: Throwable) { emptyList() }
                 main.post { result.success(out) }

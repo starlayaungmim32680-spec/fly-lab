@@ -290,6 +290,22 @@ Build (arm64 only, ~20-150 s):
   from the @fontsource npm packages, woff -> ttf with fontTools. Myanmar
   shaping of the files checked with HarfBuzz on the PC.
 
+## Project editor E4 - Stickers + photo Overlay (19 Nov 2026): WORKS (Ko tested)
+- Toolbar "Stickers": Emoji (48, drawn by the phone's emoji font) and
+  Shapes (16 drawn by the engine - heart, star, sparkle, arrow, ring,
+  bubble, crown, bolt, cloud, NEW / LOVE / WOW / OMG / SALE badges, check,
+  pin; no image files, no licences). Toolbar "Overlay": a photo from the
+  phone (image_picker) with a frame: None, Border, Rounded, Circle.
+- They are items on the SAME track as texts (TItem.kind: 0 text, 1 emoji,
+  2 shape (text = its name), 3 photo (path)) - so drag / pinch / twist on
+  the video, timeline bars, animations and export all come for free.
+  Edit panel tabs depend on the kind (photo: Edit, Frame, Color,
+  Animation; shape: Edit, Color, Animation; emoji: Edit, Animation).
+- Native: Stickers object (Android Path shapes, white rim, shadow, shine;
+  badges use the Bangers font), TextArt.render dispatches on kind;
+  channel stickerPreviews. Shapes checked with Skia on the PC.
+- Next: E4b video overlay (picture-in-picture with a moving video).
+
 ## CapCut-style editor - plan (Ko approved 17 Nov 2026: "the free way")
 Ko showed CapCut's toolbar (Edit, Audio, Text, Effects, Overlay, Captions,
 Filters, Adjust, Stickers, Generate media, AI avatar, Transcript, Aspect
