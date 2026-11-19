@@ -462,3 +462,13 @@ the mp4) 5. Futuristic "outfit" effects on the clothes (MediaPipe multiclass
 model: neon circuit, chrome armor, hologram suit, galaxy fabric, energy aura -
 texture only, not a new garment; the model is slow: ~71 ms GPU / 218 ms CPU on
 a Pixel 6) 6. Face AR stickers 7. Merge into Fly Dev -> prod.
+
+## PRODUCT DIRECTION (Ko, 19 Nov 2026) - read STUDIO_ROADMAP.md first
+- Fly Creative Studio must have its OWN identity: do not copy CapCut (or
+  any editor) - UI, branding, icons, layouts, templates, animations,
+  proprietary designs. Other editors = functional reference only.
+- Goals: easier for beginners, powerful for advanced creators, visually
+  unique, fast and reliable, integrated with Fly Social.
+- STUDIO_ROADMAP.md has the originality checklist (what in the lab looks
+  too familiar), original UX ideas and Phases 0-5. Nothing new is built
+  until Ko says go.
