@@ -475,3 +475,6 @@ a Pixel 6) 6. Face AR stickers 7. Merge into Fly Dev -> prod.
 - 19 Nov 2026: Phase 0 design PROPOSED (PHASE0_DESIGN.md: audit, Fly Studio
   Night tokens, icons/buttons, workspace zones, screens, sizes, Fly names,
   feature map, component tree, plan P0.1-P0.7). No code until Ko approves.
+- 19 Nov 2026 16:18: Ko APPROVED Phase 0 (Premium Dark) with refinements
+  R1-R9 (PHASE0_DESIGN.md §0). P0.1 = colours + typography only; exact
+  files in PHASE0_DESIGN.md §11. Waiting for Ko's go before coding.
