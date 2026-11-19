@@ -122,3 +122,16 @@ class StudioText {
     fontFeatures: [FontFeature.tabularFigures()],
   );
 }
+
+/// Sizes of the studio's timeline (P0.2). Touch areas are never under 44.
+class StudioSizes {
+  StudioSizes._();
+
+  static const double lane = 34; // one lane of a track family
+  static const double bar = 28; // a bar inside a lane
+  static const double handle = 18; // visible trim handle
+  static const double touch = 44; // finger area of a trim handle
+  static const double gutter = 76; // the track names on the left
+  static const double laneGap = 4; // space above each track family
+  static const int foldAfter = 2; // lanes shown before "+N"
+}

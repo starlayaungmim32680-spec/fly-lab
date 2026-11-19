@@ -37,6 +37,8 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'fly_catalog.dart';
+import 'studio/river/track_bar.dart';
+import 'studio/river/track_gutter.dart';
 import 'studio/studio_theme.dart';
 import 'studio/studio_tokens.dart';
 
@@ -1337,7 +1339,11 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
         '${(s % 60).toString().padLeft(2, '0')}';
   }
 
-  static const double _laneH = 24;
+  static const double _laneH = StudioSizes.lane;
+
+  /// Track families opened past StudioSizes.foldAfter lanes (P0.2):
+  /// 0 Layers, 1 Magic, 2 Sound.
+  final Set<int> _openFamilies = {};
 
   /// Effect bars in lanes: a bar goes in the first lane where it fits.
   List<List<_Fx>> _fxLanes() {
@@ -1381,70 +1387,28 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     return lanes;
   }
 
-  /// An orange text bar. Tap = select; selected: drag to move, ends to trim.
+  /// A Layers bar (text, sticker, photo). Tap = select; selected: drag to
+  /// move, drag its ends to trim.
   Widget _txBar(_Txt t) {
     final bool sel = t.uid == _txSel;
-    final double w = math.max(20.0, (t.end - t.start) * _pps);
-    Widget handle(bool left) => GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragUpdate: (d) => left
-              ? _trimTx(t, dStart: d.delta.dx / _pps)
-              : _trimTx(t, dEnd: d.delta.dx / _pps),
-          child: Container(
-            width: 14,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: StudioColors.text1,
-              borderRadius: BorderRadius.horizontal(
-                left: Radius.circular(left ? 5 : 0),
-                right: Radius.circular(left ? 0 : 5),
-              ),
-            ),
-            child: Container(width: 2, height: 10, color: StudioColors.grip),
-          ),
-        );
     return Positioned(
       left: t.start * _pps,
-      top: 2,
-      height: _laneH - 4,
-      width: w,
-      child: GestureDetector(
+      top: (StudioSizes.lane - StudioSizes.bar) / 2,
+      child: TrackBar(
+        width: math.max(20.0, (t.end - t.start) * _pps),
+        color: StudioColors.layers,
+        tint: StudioColors.layersTint,
+        icon: switch (t.kind) {
+          1 || 2 => Icons.emoji_emotions_outlined,
+          3 => Icons.image_outlined,
+          _ => Icons.title,
+        },
+        label: _itemLabel(t),
+        selected: sel,
         onTap: () => _selectTx(sel ? null : t),
-        onHorizontalDragUpdate:
-            sel ? (d) => _moveTx(t, d.delta.dx / _pps) : null,
-        child: Container(
-          decoration: BoxDecoration(
-            color: sel ? StudioColors.layers : StudioColors.layersTint,
-            borderRadius: BorderRadius.circular(5),
-            border: Border.all(
-                color: sel ? StudioColors.text1 : StudioColors.layers, width: 1.2),
-          ),
-          child: Row(
-            children: [
-              if (sel) handle(true),
-              const SizedBox(width: 4),
-              Icon(
-                  switch (t.kind) {
-                    1 || 2 => Icons.emoji_emotions_outlined,
-                    3 => Icons.image_outlined,
-                    _ => Icons.title,
-                  },
-                  size: 11,
-                  color: sel ? StudioColors.ink0 : StudioColors.text1),
-              const SizedBox(width: 3),
-              Expanded(
-                child: Text(_itemLabel(t),
-                    maxLines: 1,
-                    overflow: TextOverflow.clip,
-                    style: sel
-                        ? StudioText.captionStrong
-                            .copyWith(color: StudioColors.ink0)
-                        : StudioText.captionStrong),
-              ),
-              if (sel) handle(false),
-            ],
-          ),
-        ),
+        onMove: (dx) => _moveTx(t, dx / _pps),
+        onTrimStart: (dx) => _trimTx(t, dStart: dx / _pps),
+        onTrimEnd: (dx) => _trimTx(t, dEnd: dx / _pps),
       ),
     );
   }
@@ -1831,34 +1795,20 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     return lanes;
   }
 
-  /// A green music bar. Tap = select; selected: drag to move, ends to trim.
+  /// A Sound bar (music). Tap = select; selected: drag to move, ends to
+  /// trim.
   Widget _auBar(_Audio a) {
     final bool sel = a.uid == _auSel;
-    final double w = math.max(20.0, (a.end - a.start) * _pps);
-    Widget handle(bool left) => GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragUpdate: (d) => left
-              ? _trimAu(a, dStart: d.delta.dx / _pps)
-              : _trimAu(a, dEnd: d.delta.dx / _pps),
-          child: Container(
-            width: 14,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: StudioColors.text1,
-              borderRadius: BorderRadius.horizontal(
-                left: Radius.circular(left ? 5 : 0),
-                right: Radius.circular(left ? 0 : 5),
-              ),
-            ),
-            child: Container(width: 2, height: 10, color: StudioColors.grip),
-          ),
-        );
     return Positioned(
       left: a.start * _pps,
-      top: 2,
-      height: _laneH - 4,
-      width: w,
-      child: GestureDetector(
+      top: (StudioSizes.lane - StudioSizes.bar) / 2,
+      child: TrackBar(
+        width: math.max(20.0, (a.end - a.start) * _pps),
+        color: StudioColors.sound,
+        tint: StudioColors.soundTint,
+        icon: Icons.music_note,
+        label: a.name,
+        selected: sel,
         onTap: () => setState(() {
           _auSel = sel ? null : a.uid;
           _sel = null;
@@ -1866,36 +1816,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _txSel = null;
           _panel = sel ? _Panel.audio : _Panel.audioEdit;
         }),
-        onHorizontalDragUpdate:
-            sel ? (d) => _moveAu(a, d.delta.dx / _pps) : null,
-        child: Container(
-          decoration: BoxDecoration(
-            color: sel ? StudioColors.sound : StudioColors.soundTint,
-            borderRadius: BorderRadius.circular(5),
-            border: Border.all(
-                color: sel ? StudioColors.text1 : StudioColors.sound, width: 1.2),
-          ),
-          child: Row(
-            children: [
-              if (sel) handle(true),
-              const SizedBox(width: 4),
-              Icon(Icons.music_note,
-                  size: 11,
-                  color: sel ? StudioColors.ink0 : StudioColors.text1),
-              const SizedBox(width: 3),
-              Expanded(
-                child: Text(a.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.clip,
-                    style: sel
-                        ? StudioText.captionStrong
-                            .copyWith(color: StudioColors.ink0)
-                        : StudioText.captionStrong),
-              ),
-              if (sel) handle(false),
-            ],
-          ),
-        ),
+        onMove: (dx) => _moveAu(a, dx / _pps),
+        onTrimStart: (dx) => _trimAu(a, dStart: dx / _pps),
+        onTrimEnd: (dx) => _trimAu(a, dEnd: dx / _pps),
       ),
     );
   }
@@ -2046,17 +1969,80 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     );
   }
 
+  /// Lanes of a family that are shown: all when opened (or when the
+  /// selected item sits in a folded lane), else the first few.
+  List<List<T>> _shown<T>(List<List<T>> lanes, int family, bool Function(T) isSel) {
+    if (lanes.length <= StudioSizes.foldAfter || _openFamilies.contains(family)) {
+      return lanes;
+    }
+    for (int i = StudioSizes.foldAfter; i < lanes.length; i++) {
+      if (lanes[i].any(isSel)) return lanes;
+    }
+    return lanes.sublist(0, StudioSizes.foldAfter);
+  }
+
+  void _toggleFamily(int family) {
+    setState(() {
+      if (!_openFamilies.remove(family)) _openFamilies.add(family);
+    });
+  }
+
+  /// One lane: a strip as wide as the clips plus the trim handles' reach
+  /// on both sides, so a handle at 0:00 or at the end can still be touched.
+  /// (The whole column starts TrackBar.reach before 0:00.)
+  Widget _lane(double stripW, List<Widget> bars) {
+    return SizedBox(
+      height: _laneH,
+      width: math.max(stripW, 1.0) + TrackBar.reach * 2,
+      child: Stack(clipBehavior: Clip.none, children: bars),
+    );
+  }
+
+  /// The timeline ("river", P0.2): Story (clips), then the track families
+  /// Layers, Magic and Sound - each with its colour and name in the gutter
+  /// on the left. Centre playhead = the aurora needle.
   Widget _timeline() {
     return LayoutBuilder(builder: (context, box) {
       final double half = box.maxWidth / 2;
-      final List<List<_Fx>> lanes = _fxLanes();
-      final List<List<_Audio>> auLanes = _auLanes();
-      final List<List<_Txt>> txLanes = _txLanes();
+      final List<List<_Txt>> txAll = _txLanes();
+      final List<List<_Fx>> fxAll = _fxLanes();
+      final List<List<_Audio>> auAll = _auLanes();
+      final List<List<_Txt>> txLanes =
+          _shown<_Txt>(txAll, 0, (t) => t.uid == _txSel);
+      final List<List<_Fx>> fxLanes =
+          _shown<_Fx>(fxAll, 1, (f) => f.uid == _fxSel);
+      final List<List<_Audio>> auLanes =
+          _shown<_Audio>(auAll, 2, (a) => a.uid == _auSel);
       final double stripW = _clips.fold(0.0, (s, c) => s + _widthOf(c));
-      final double h = 66 +
-          (lanes.isEmpty ? 0 : lanes.length * _laneH + 4) +
-          (auLanes.isEmpty ? 0 : auLanes.length * _laneH + 4) +
-          (txLanes.isEmpty ? 0 : txLanes.length * _laneH + 4);
+
+      // Vertical places: 5 top padding, 56 clip row, then each family.
+      const double storyTop = 5;
+      double y = storyTop + 56;
+      final List<GutterEntry> gutter = [
+        const GutterEntry(
+            top: storyTop + (56 - StudioSizes.lane) / 2,
+            label: 'Story',
+            color: StudioColors.story),
+      ];
+      void family(int id, String name, Color color, int shown, int all) {
+        if (all == 0) return;
+        y += StudioSizes.laneGap;
+        gutter.add(GutterEntry(
+          top: y,
+          label: name,
+          color: color,
+          hidden: all - shown,
+          open: _openFamilies.contains(id) && all > StudioSizes.foldAfter,
+          onFold: all > StudioSizes.foldAfter ? () => _toggleFamily(id) : null,
+        ));
+        y += shown * _laneH;
+      }
+
+      family(0, 'Layers', StudioColors.layers, txLanes.length, txAll.length);
+      family(1, 'Magic', StudioColors.magic, fxLanes.length, fxAll.length);
+      family(2, 'Sound', StudioColors.sound, auLanes.length, auAll.length);
+      final double h = y + 5;
+
       return SizedBox(
         height: h,
         child: Stack(
@@ -2066,13 +2052,16 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
               child: SingleChildScrollView(
                 controller: _sc,
                 scrollDirection: Axis.horizontal,
-                padding: EdgeInsets.fromLTRB(half, 5, half - 60, 5),
+                padding: EdgeInsets.fromLTRB(
+                    half - TrackBar.reach, storyTop, half - 60, 5),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
+                    Container(
                       height: 56,
+                      padding: const EdgeInsets.only(left: TrackBar.reach),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           for (final _Clip c in _clips) _clipBox(c),
@@ -2082,58 +2071,64 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
                               width: 52,
                               margin: const EdgeInsets.only(left: 6),
                               decoration: BoxDecoration(
-                                color: StudioColors.text1,
-                                borderRadius: BorderRadius.circular(8),
+                                color: StudioColors.ink2,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: StudioColors.lineStrong),
                               ),
-                              child: const Icon(Icons.add, color: StudioColors.ink0),
+                              child: const Icon(Icons.add,
+                                  color: StudioColors.text1),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    if (lanes.isNotEmpty) const SizedBox(height: 4),
-                    for (final List<_Fx> lane in lanes)
-                      SizedBox(
-                        height: _laneH,
-                        width: math.max(stripW, 1.0),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [for (final _Fx f in lane) _fxBar(f)],
-                        ),
-                      ),
-                    if (txLanes.isNotEmpty) const SizedBox(height: 4),
+                    if (txLanes.isNotEmpty)
+                      const SizedBox(height: StudioSizes.laneGap),
                     for (final List<_Txt> lane in txLanes)
-                      SizedBox(
-                        height: _laneH,
-                        width: math.max(stripW, 1.0),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [for (final _Txt t in lane) _txBar(t)],
-                        ),
-                      ),
-                    if (auLanes.isNotEmpty) const SizedBox(height: 4),
+                      _lane(stripW, [for (final _Txt t in lane) _txBar(t)]),
+                    if (fxLanes.isNotEmpty)
+                      const SizedBox(height: StudioSizes.laneGap),
+                    for (final List<_Fx> lane in fxLanes)
+                      _lane(stripW, [for (final _Fx f in lane) _fxBar(f)]),
+                    if (auLanes.isNotEmpty)
+                      const SizedBox(height: StudioSizes.laneGap),
                     for (final List<_Audio> lane in auLanes)
-                      SizedBox(
-                        height: _laneH,
-                        width: math.max(stripW, 1.0),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [for (final _Audio a in lane) _auBar(a)],
-                        ),
-                      ),
+                      _lane(stripW, [for (final _Audio a in lane) _auBar(a)]),
                   ],
                 ),
               ),
             ),
             Positioned(
-              left: half - 1,
+              left: 0,
               top: 0,
               bottom: 0,
+              child: TrackGutter(entries: gutter),
+            ),
+            // Playhead: the aurora needle with a round cap.
+            Positioned(
+              left: half - 1,
+              top: 4,
+              bottom: 2,
               child: IgnorePointer(
                 child: Container(
                     width: 2,
                     decoration: const BoxDecoration(
                         gradient: StudioColors.auroraVertical)),
+              ),
+            ),
+            Positioned(
+              left: half - 6,
+              top: 0,
+              child: IgnorePointer(
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: StudioColors.coral,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: StudioColors.ink0, width: 2),
+                  ),
+                ),
               ),
             ),
           ],
@@ -2142,35 +2137,20 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
     });
   }
 
-  /// One effect bar. Tap = select; when selected, drag it to move it in
-  /// time and drag its ends to change where it starts / stops.
+  /// A Magic bar (effect). Tap = select; selected: drag to move it in time,
+  /// drag its ends to change where it starts / stops.
   Widget _fxBar(_Fx f) {
     final bool sel = f.uid == _fxSel;
-    final double w = math.max(20.0, (f.end - f.start) * _pps);
-    Widget handle(bool left) => GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragUpdate: (d) => left
-              ? _trimFx(f, dStart: d.delta.dx / _pps)
-              : _trimFx(f, dEnd: d.delta.dx / _pps),
-          child: Container(
-            width: 14,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: StudioColors.text1,
-              borderRadius: BorderRadius.horizontal(
-                left: Radius.circular(left ? 5 : 0),
-                right: Radius.circular(left ? 0 : 5),
-              ),
-            ),
-            child: Container(width: 2, height: 10, color: StudioColors.grip),
-          ),
-        );
     return Positioned(
       left: f.start * _pps,
-      top: 2,
-      height: _laneH - 4,
-      width: w,
-      child: GestureDetector(
+      top: (StudioSizes.lane - StudioSizes.bar) / 2,
+      child: TrackBar(
+        width: math.max(20.0, (f.end - f.start) * _pps),
+        color: StudioColors.magic,
+        tint: StudioColors.magicTint,
+        icon: f.placed ? Icons.my_location : Icons.auto_awesome,
+        label: flyLabel(f.id),
+        selected: sel,
         onTap: () => setState(() {
           _fxSel = sel ? null : f.uid;
           _sel = null;
@@ -2178,36 +2158,9 @@ class _ProjectEditorScreenState extends State<ProjectEditorScreen>
           _txSel = null;
           _panel = sel ? _Panel.none : _Panel.fxEdit;
         }),
-        onHorizontalDragUpdate:
-            sel ? (d) => _moveFx(f, d.delta.dx / _pps) : null,
-        child: Container(
-          decoration: BoxDecoration(
-            color: sel ? StudioColors.magic : StudioColors.magicTint,
-            borderRadius: BorderRadius.circular(5),
-            border: Border.all(
-                color: sel ? StudioColors.text1 : StudioColors.magic, width: 1.2),
-          ),
-          child: Row(
-            children: [
-              if (sel) handle(true),
-              const SizedBox(width: 4),
-              Icon(f.placed ? Icons.my_location : Icons.auto_awesome,
-                  size: 11,
-                  color: sel ? StudioColors.ink0 : StudioColors.text1),
-              const SizedBox(width: 3),
-              Expanded(
-                child: Text(flyLabel(f.id),
-                    maxLines: 1,
-                    overflow: TextOverflow.clip,
-                    style: sel
-                        ? StudioText.captionStrong
-                            .copyWith(color: StudioColors.ink0)
-                        : StudioText.captionStrong),
-              ),
-              if (sel) handle(false),
-            ],
-          ),
-        ),
+        onMove: (dx) => _moveFx(f, dx / _pps),
+        onTrimStart: (dx) => _trimFx(f, dStart: dx / _pps),
+        onTrimEnd: (dx) => _trimFx(f, dEnd: dx / _pps),
       ),
     );
   }
